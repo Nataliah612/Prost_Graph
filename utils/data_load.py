@@ -9,16 +9,11 @@ from torchvision import transforms as T
 
 import gc
 from tqdm import tqdm
-import h5py
-
-from PIL import Image
-
 
 def create_file_label_df(embedding_path, data_path, slide_col='image_id'):
     features_list = []
     labels_list = []
     patient_list = []
-    coord_list = []
     gleason_score = []
     gleason_primary_list = []
     gleason_secondary_list = []
@@ -28,6 +23,8 @@ def create_file_label_df(embedding_path, data_path, slide_col='image_id'):
     # Agrega tqdm aquí
     for f in tqdm(embeddings, desc="Procesando embeddings"):
         slide_id = f.split('.npy')[0]
+        if slide_col == 'slide_id':
+            slide_id = slide_id.split('_')[0]
         row = df[df[slide_col] == slide_id]
 
         if not row.empty:

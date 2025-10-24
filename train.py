@@ -13,9 +13,9 @@ from tqdm import tqdm
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 
 # =============== IMPORT FUNCIONES ======================
-from code_slurm.model_1graph import model_gat, device, weights_init
-from data_load import create_file_label_df, CustomDataset,RandomDataset, collate_fn
-from utils import FocalLoss, compute_class_weights, compute_metrics
+from models.model_1graph import model_gat, device, weights_init
+from utils.data_load import create_file_label_df, CustomDataset,RandomDataset, collate_fn
+from utils.utils import FocalLoss, compute_class_weights, compute_metrics
 
 
 os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "max_split_size_mb:128"

@@ -3,7 +3,7 @@ import torch.nn as nn
 
 from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, cohen_kappa_score
 
-from code_slurm.model_2graph import device
+from models.model_2graph import device
 
 class FocalLoss(nn.Module):
     def __init__(self, gamma=2.0, weight=None, reduction='sum'):

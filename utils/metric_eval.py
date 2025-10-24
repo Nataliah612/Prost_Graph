@@ -21,7 +21,7 @@ from sklearn.metrics import (
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-from utils import FocalLoss
+from utils.utils import FocalLoss
 
 # --------------------- plotting helpers (sin cambios lógicos) ---------------------
 def plot_learning_model(epochs, train_losses, val_losses, train_accuracies, val_accuracies, plot_lr_path):
@@ -298,7 +298,7 @@ def evaluate(
             y1 = torch.tensor([label_mapping[i.item()] for i in y[:, 0]], device=device)
             y2 = torch.tensor([label_mapping[i.item()] for i in y[:, 1]], device=device)
 
-            out1, out2 = model(inputs, y)
+            out1, out2 = model(inputs)
 
             # --------- pérdidas (opcional) ----------
             loss = (loss_fn1(out1, y1) + loss_fn2(out2, y2))
