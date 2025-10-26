@@ -93,16 +93,33 @@ class adj(nn.Module):
         pair = torch.cat([node_i, node_j], dim=-1)  # (E, 768*2)
         return torch.sigmoid(self.mlp(pair))  # (E, 1)
 
-
+class Attention(nn.Module):
+    def __init__(self, L = 512, D = 256, I = 1):
+        super().__init__()
+        '''Codigo de: (AtriiMIL)'''
+        self.branch_1 = nn.Sequential(
+            nn.Linear(L,D), 
+            nn.Tanh())
+        self.branch_2 = nn.Sequential(
+            nn.Linear(L,D), 
+            nn.Sigmoid())
+        self.branch_3= nn.Linear(D,I)
+        
+    def forward(self, x): 
+        xa = self.branch_1(x)
+        xb = self.branch_2(x)
+        A = xa.mul(xb)
+        A = self.branch_3(A) 
+        return A
 
 class gat(torch.nn.Module):
     def __init__(self, heads=4):
         super(gat,self).__init__()
 
-        self.gat1 = GATConv(768, 512, heads=heads, edge_dim = 1)
-        self.gat2 = GATConv(512*heads, 64, heads=heads, edge_dim = 1)
-        att_net = nn.Sequential(nn.Linear(256, 128), nn.ReLU(), nn.Linear(128, 64), nn.ReLU(), nn.Linear(64, 1),
-                                nn.Tanh())
+        self.gat1 = GATConv(768, 512, heads=heads, edge_dim = 1, concat=False)
+        self.gat2 = GATConv(512, 64, heads=heads, edge_dim = 1)
+        #att_net = nn.Sequential(nn.Linear(256, 128), nn.ReLU(), nn.Linear(128, 64), nn.ReLU(), nn.Linear(64, 1),nn.Tanh())
+        att_net = Attention(256,128,1)
         self.pool = AttentionalAggregation(att_net)
        
     def forward(self,data):
@@ -133,7 +150,7 @@ class mlp(nn.Module):
         self.dropout = nn.Dropout(0.3)  # Regularización
 
         self.fc4_primary = nn.Linear(64, 4)
-        self.fc4_secondary = nn.Linear(64, 4)
+        #self.fc4_secondary = nn.Linear(64, 4)
 
     def forward(self, x):
         x = self.fc1(x)
@@ -147,9 +164,10 @@ class mlp(nn.Module):
         x = self.dropout(x)
 
         x1 = self.fc4_primary(x)
-        x2 = self.fc4_secondary(x)
+        #probs = torch.sigmoid(x1)   # ← activación sigmoide en la salida
+        #x2 = self.fc4_secondary(x)
 
-        return x1, x2
+        return x1 #x1, x2
 
 class model_gat(nn.Module):
     def __init__(self):
@@ -193,9 +211,9 @@ class model_gat(nn.Module):
         bf_x = torch.cat(all_outputs, dim=0)  # (total_graphs, hidden_dim)
 
         # Pasar todo por el MLP directamente
-        x1, x2 = self.mlp_out(bf_x)
+        x1 = self.mlp_out(bf_x)
 
-        return x1, x2
+        return x1
 
 def weights_init(m):
     if isinstance(m, nn.Linear):

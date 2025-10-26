@@ -63,19 +63,20 @@ class CustomDataset(Dataset):
         self.dataframe = dataframe
         self.indices = indices  # Almacena los índices proporcionados
 
-        self.features = [self.dataframe.iloc[i]['features']
-            for i in tqdm(indices, desc="Cargando features")
-        ]
+        self.features = []
+        for i in tqdm(indices, desc="Cargando features"):
+            features = self.dataframe.iloc[i]['features']
+            features = np.load(features, mmap_mode='r')
+            self.features.append(features)
 
         self.labels = [
             torch.tensor(self.dataframe.iloc[i]['labels'], dtype=torch.float32)
             for i in tqdm(indices, desc="Cargando labels")
         ]
 
-
     def __getitem__(self, idx):
-        features = np.load(self.features[idx], mmap_mode='r')
-        return torch.tensor(features), self.labels[idx]
+        
+        return self.features[idx], self.labels[idx]
 
     def __len__(self):
         return len(self.indices)

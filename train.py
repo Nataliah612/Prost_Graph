@@ -97,8 +97,8 @@ def train_and_evaluate(model, model_id, model_path, params, paths):
     w_class1  = compute_class_weights(df_train["gleason_primary"])
     w_class2  = compute_class_weights(df_train["gleason_secondary"])
 
-    loss_fn1  = FocalLoss(weight=w_class1, gamma=2.0)
-    loss_fn2  = FocalLoss(weight=w_class2, gamma=2.0)
+    loss_fn1  = nn.CrossEntropyLoss(weight= w_class1) #FocalLoss(weight=w_class1, gamma=2.0)
+    loss_fn2  = nn.CrossEntropyLoss(weight= w_class2) #FocalLoss(weight=w_class2, gamma=2.0)
 
     model.apply(weights_init)
    
