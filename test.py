@@ -12,7 +12,7 @@ from safetensors.torch import load_file
 # CONFIGURACIÓN
 # ========================================
 MODEL_TYPE = 3  
-BASE_PATH = '/workspace/results/try_1e-06_32_100' 
+BASE_PATH = '/workspace/results/try_0.001_32_100' 
 batch = 16 
 
 MODEL_CONFIG = {

@@ -67,7 +67,7 @@ class CustomDataset(Dataset):
         for i in tqdm(indices, desc="Cargando features"):
             features = self.dataframe.iloc[i]['features']
             features = np.load(features, mmap_mode='r')
-            self.features.append(features)
+            self.features.append(torch.tensor(features))
 
         self.labels = [
             torch.tensor(self.dataframe.iloc[i]['labels'], dtype=torch.float32)
@@ -106,9 +106,9 @@ class RandomDataset(Dataset):
             features = np.load(row['features'], mmap_mode='r')
             
             # Aplicamos transform a cada imagen
-            features_tensor = torch.stack(features)
+            self.features.append(torch.tensor(features))
             
-            self.features.append(features_tensor)
+            
 
         # Inicializa ind_subset (hay que llamar update_random_list() antes de usar)
         self.ind_subset = None
@@ -131,7 +131,7 @@ class RandomDataset(Dataset):
        
         pos_relative = self.indices.index(self.ind_subset[idx])
 
-        return self.images[pos_relative], self.labels[pos_relative]
+        return self.features[pos_relative], self.labels[pos_relative]
 
 def collate_fn(batch):
     features, labels = zip(*batch)

@@ -24,9 +24,9 @@ gc.collect()
 # =================== CONFIGURACIÓN ===================
 BASE_PATH = "/workspace/results"
 MODEL_TYPE = 3
-LEARNING_RATES = [5e-3]#, 1e-5, 1e-6,1e-4]
+LEARNING_RATES = [1e-4]#, 1e-5, 1e-6,1e-4]
 EPOCHS_RANGE = [100]
-BATCH_SIZES = [ 64]#, 128, 32]
+BATCH_SIZES = [128]#, 128, 64,32]
 PATIENCE = 10
 RANDOM_SEED = 98
 
@@ -125,13 +125,14 @@ def train_and_evaluate(model, model_id, model_path, params, paths):
         train_seen     = torch.zeros(1, dtype=torch.long, device=device)
 
         for inputs, y in tqdm(train_loader, desc="Training"):
-            y1 = torch.tensor([label_mapping[i.item()] for i in y[:, 0]], device=device)
-            y2 = torch.tensor([label_mapping[i.item()] for i in y[:, 1]], device=device)
-
+            #y1 = torch.tensor([label_mapping[i.item()] for i in y[:, 0]], device=device)
+            #y2 = torch.tensor([label_mapping[i.item()] for i in y[:, 1]], device=device)
+            y_onehot = torch.zeros(params["batch"], 4).to(device)
+            y_onehot.scatter_(1, y.to(device), 1)  # y_indices debe tener shape [batch_size, 2]
             #out1, out2 = model(inputs.to(device),)
             #loss = loss_fn1(out1, y1) + loss_fn2(out2, y2)
             out1 = model(inputs.to(device))
-            loss = loss_sigm(out1,y.to(device))
+            loss = loss_sigm(out1,y_onehot.to(device))
 
             optimizer.zero_grad()
             loss.backward()
@@ -144,6 +145,7 @@ def train_and_evaluate(model, model_id, model_path, params, paths):
             outputs = torch.sigmoid(out1)  # si usas BCEWithLogitsLoss
             top2 = torch.topk(outputs, 2, dim=1)  # los 2 valores más altos por muestra
             preds_ok = top2.indices
+            
             train_correct += preds_ok
             train_seen    += batch_sz
 
@@ -160,13 +162,14 @@ def train_and_evaluate(model, model_id, model_path, params, paths):
 
         with torch.no_grad():
             for inputs, y in tqdm(val_loader, desc="Validation"):
-                y1 = torch.tensor([label_mapping[i.item()] for i in y[:, 0]], device=device)
-                y2 = torch.tensor([label_mapping[i.item()] for i in y[:, 1]], device=device)
-
+                #y1 = torch.tensor([label_mapping[i.item()] for i in y[:, 0]], device=device)
+                #y2 = torch.tensor([label_mapping[i.item()] for i in y[:, 1]], device=device)
+                y_onehot = torch.zeros(params["batch"], 4).to(device)
+                y_onehot.scatter_(1, y.to(device), 1)  # y_indices debe tener shape [batch_size, 2]
                 #out1, out2 = model(inputs.to(device))
                 #loss = loss_fn1(out1, y1) + loss_fn2(out2, y2)
                 out1 = model(inputs.to(device))
-                loss = loss_sigm(out1,y.to(device))
+                loss = loss_sigm(out1,y_onehot.to(device))
 
                 batch_sz = inputs.size(0)
                 val_loss_sum += loss.item() * batch_sz
@@ -204,13 +207,14 @@ def train_and_evaluate(model, model_id, model_path, params, paths):
 
         with torch.no_grad():
             for inputs, y in tqdm(test_loader, desc="Test"):
-                y1 = torch.tensor([label_mapping[i.item()] for i in y[:, 0]], device=device)
-                y2 = torch.tensor([label_mapping[i.item()] for i in y[:, 1]], device=device)
-
+                #y1 = torch.tensor([label_mapping[i.item()] for i in y[:, 0]], device=device)
+                #y2 = torch.tensor([label_mapping[i.item()] for i in y[:, 1]], device=device)
+                y_onehot = torch.zeros(params["batch"], 4).to(device)
+                y_onehot.scatter_(1, y.to(device), 1)  # y_indices debe tener shape [batch_size, 2]
                 #out1, out2 = model(inputs.to(device))
                 #loss = loss_fn1(out1, y1) + loss_fn2(out2, y2)
                 out1 = model(inputs.to(device))
-                loss = loss_sigm(out1,y.to(device))
+                loss = loss_sigm(out1,y_onehot.to(device))
 
                 batch_sz = inputs.size(0)
                 test_loss_sum += loss.item() * batch_sz
