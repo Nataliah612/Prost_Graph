@@ -3,7 +3,7 @@ import torch
 from torch.utils.data import DataLoader
 
 # Módulos propios
-from utils.metric_eval import evaluate
+from utils.metric_eval import evaluate, evaluate1
 from utils.data_load import create_file_label_df,CustomDataset, collate_fn
 from models.model_1graph import model_gat
 from safetensors.torch import load_file
@@ -12,7 +12,7 @@ from safetensors.torch import load_file
 # CONFIGURACIÓN
 # ========================================
 MODEL_TYPE = 3  
-BASE_PATH = '/workspace/results/try_0.001_32_100' 
+BASE_PATH = '/workspace/results/try_0.0001_128_100' 
 batch = 16 
 
 MODEL_CONFIG = {
@@ -28,7 +28,7 @@ model = model_fn()
 
 # Paths
 sicap_path_embeddings='/workspace/data/features_SICAP/embeddings/KEEP'
-excel_path_sicap=  '/workspace/data/wsi_labels_changed.xlsx'
+excel_path_sicap= '/workspace/data/wsi_labels_changed_SICAP.xlsx'
 
 model_path = os.path.join(BASE_PATH, "best_model.pth") #"model.safetensors") 
 out_path = os.path.join(BASE_PATH,"metrics_global.txt")
@@ -38,7 +38,7 @@ excel_path = os.path.join(BASE_PATH, "metric_label.xlsx")
 c_path = os.path.join(BASE_PATH,  "conf_matrix_SICAP_sum.png")
 
 # PREPARACIÓN DE DATOS
-df_test  = create_file_label_df(sicap_path_embeddings,excel_path_sicap,slide_col='slide_id')
+df_test  = create_file_label_df(sicap_path_embeddings,excel_path_sicap, NAME='SICAP')#,slide_col='slide_id')
 test_loader_sicap = DataLoader(CustomDataset(df_test, df_test.index),
                             batch_size=batch,
                             shuffle=False, collate_fn=collate_fn)
@@ -47,4 +47,4 @@ test_loader_sicap = DataLoader(CustomDataset(df_test, df_test.index),
 model.load_state_dict(torch.load(model_path, map_location = device) ) #state_dict) #
 model.to(device)
 
-acc, prec, rec, f1, kappa = evaluate(model, test_loader_sicap, output_path=out_path,  ruta_excel=excel_path, conf_path=c_path, conf_matrix_path2=conf_matrix_path)
+acc, prec, rec, f1, kappa = evaluate1(model, test_loader_sicap, output_path=out_path,  ruta_excel=excel_path, conf_path=c_path)#, conf_matrix_path2=conf_matrix_path)

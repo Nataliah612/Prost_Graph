@@ -4,6 +4,12 @@ import torch.nn.init
 import torch.nn.functional as F
 from torch_geometric import data
 from torch_geometric.nn import GATConv, AttentionalAggregation, AGNNConv
+
+from torch import Tensor
+from torch_geometric.nn import MLP
+from typing import Optional
+from torch_geometric.nn.aggr import Aggregation
+
 import os
 os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "max_split_size_mb:128"
 
@@ -111,7 +117,62 @@ class Attention(nn.Module):
         A = xa.mul(xb)
         A = self.branch_3(A) 
         return A
+    
+class AttentionalAggregation2(Aggregation):
+    r"""Args:
+        gate_nn (torch.nn.Module): A neural network :math:`h_{\mathrm{gate}}`
+            that computes attention scores by mapping node features :obj:`x` of
+            shape :obj:`[-1, in_channels]` to shape :obj:`[-1, 1]` (for
+            node-level gating) or :obj:`[1, out_channels]` (for feature-level
+            gating), *e.g.*, defined by :class:`torch.nn.Sequential`.
+        nn (torch.nn.Module, optional): A neural network
+            :math:`h_{\mathbf{\Theta}}` that maps node features :obj:`x` of
+            shape :obj:`[-1, in_channels]` to shape :obj:`[-1, out_channels]`
+            before combining them with the attention scores, *e.g.*, defined by
+            :class:`torch.nn.Sequential`. (default: :obj:`None`)
+    """
+    def __init__(
+        self,
+        gate_nn: torch.nn.Module,
+        nn: Optional[torch.nn.Module] = None,
+    ):
+        super().__init__()
 
+        self.gate_nn = self.gate_mlp = None
+        if isinstance(gate_nn, MLP):
+            self.gate_mlp = gate_nn
+        else:
+            self.gate_nn = gate_nn
+
+        self.nn = self.mlp = None
+        if isinstance(nn, MLP):
+            self.mlp = nn
+        else:
+            self.nn = nn
+
+    def forward(self, x: Tensor, index: Optional[Tensor] = None,
+                ptr: Optional[Tensor] = None, dim_size: Optional[int] = None,
+                dim: int = -2, batch:Optional[Tensor] = None) -> Tensor:
+
+        if self.gate_mlp is not None:
+            gate = self.gate_mlp(x, batch=index, batch_size=dim_size)
+        else:
+            gate = self.gate_nn(x)
+
+        if self.mlp is not None:
+            x = self.mlp(x, batch=index, batch_size=dim_size)
+        elif self.nn is not None:
+            x = self.nn(x)
+
+        gate = torch.softmax(gate, dim=dim) 
+        h = gate*x
+        return h, gate
+
+    def __repr__(self) -> str:
+        return (f'{self.__class__.__name__}('
+                f'gate_nn={self.gate_mlp or self.gate_nn}, '
+                f'nn={self.mlp or self.nn})')
+    
 class gat(torch.nn.Module):
     def __init__(self, heads=4):
         super(gat,self).__init__()
@@ -120,7 +181,7 @@ class gat(torch.nn.Module):
         self.gat2 = GATConv(512, 64, heads=heads, edge_dim = 1)
         #att_net = nn.Sequential(nn.Linear(256, 128), nn.ReLU(), nn.Linear(128, 64), nn.ReLU(), nn.Linear(64, 1),nn.Tanh())
         att_net = Attention(256,128,1)
-        self.pool = AttentionalAggregation(att_net)
+        self.pool = AttentionalAggregation2(att_net)
        
     def forward(self,data):
         x, edge_index, edge_weight, batch = data.x, data.edge_index, data.edge_attr,data.batch

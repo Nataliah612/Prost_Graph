@@ -400,3 +400,107 @@ def evaluate(
     )
 
     return acc, prec, rec, f1, kappa
+
+def evaluate1(
+    model,
+    dataloader,
+    output_path,
+    ruta_excel,
+    conf_path,
+    label_mapping={0: 0, 3: 1, 4: 2, 5: 3},
+):
+    """
+    Versión para modelo con una sola salida.
+    - Usa una sola pérdida (p. ej. BCEWithLogitsLoss o CrossEntropyLoss)
+    - Calcula métricas y matriz de confusión del Gleason Score combinado.
+    """
+
+    model.eval()
+    loss_fn = nn.BCEWithLogitsLoss()  # o la que uses (ej. loss_sigm)
+
+    total_loss, sample_count = 0.0, 0
+    all_true, all_pred = [], []
+
+    inverse_label_mapping = {0: 0, 1: 3, 2: 4, 3: 5}
+
+    with torch.no_grad():
+        for inputs, y in dataloader:
+            inputs, y = inputs.to(device), y.to(device)
+
+            # ---- mapeo de etiquetas originales a internas ----
+            y = torch.tensor([[label_mapping[int(v.item())] for v in row] for row in y], device=device)
+            y_onehot = torch.zeros(y.shape[0], 4, device=device)
+            y_onehot.scatter_(1, y, 1)  # convierte a one-hot
+
+            # ---- forward ----
+            out = model(inputs)
+
+            # ---- pérdida ----
+            loss = loss_fn(out, y_onehot)
+            batch_sz = inputs.size(0)
+            total_loss += loss.item() * batch_sz
+            sample_count += batch_sz
+
+            # ---- predicciones ----
+            probs = torch.sigmoid(out)
+            top2 = torch.topk(probs, 2, dim=1).indices  # dos clases más altas
+
+            # reconstruir GS real y predicho
+            # Crear un tensor de mapeo
+            mapping_tensor = torch.tensor(
+                [inverse_label_mapping[i] for i in range(len(inverse_label_mapping))],
+                device=device
+            )
+
+            # Aplicar el mapeo de forma vectorizada
+            y_real = mapping_tensor[y]      # (batch_size, 4)
+            y_pred = mapping_tensor[top2]   # (batch_size, 4)
+            y_real = y_real.sum(dim=1)
+            y_pred = y_pred.sum(dim=1)
+
+            all_true.extend(y_real.cpu().numpy())
+            all_pred.extend(y_pred.cpu().numpy())
+
+    # ---- métricas globales ----
+    labels_gs = [0, 6, 7, 8, 9, 10]
+    acc, prec, rec, f1, kappa, df_cls = _compute_global_metrics(
+        all_true, all_pred, labels_gs, ruta_excel
+    )
+
+    avg_loss = total_loss / sample_count
+
+    # ---- matriz de confusión ----
+    cm = confusion_matrix(all_true, all_pred, labels=labels_gs)
+    plt.figure(figsize=(6, 5))
+    sns.heatmap(
+        cm, annot=True, fmt="d", cmap="Blues",
+        xticklabels=labels_gs, yticklabels=labels_gs
+    )
+    plt.xlabel("Predicted GS")
+    plt.ylabel("True GS")
+    plt.title("Confusion Matrix (Gleason Score)")
+    legend_labels = [
+        mpatches.Patch(color="white", label="0 = No canceroso"),
+        mpatches.Patch(color="white", label="6,7,8,9 = Canceroso"),
+    ]
+    plt.legend(handles=legend_labels, loc="lower center", ncol=2, frameon=False)
+    plt.tight_layout(rect=[0, 0.5, 1, 1])
+    plt.savefig(conf_path, bbox_inches="tight")
+    plt.close()
+
+    # ---- logging ----
+    with open(output_path, "w") as f:
+        f.write("Evaluation (Gleason-Score level)\n")
+        f.write(f"Loss      : {avg_loss:.4f}\n")
+        f.write(f"Accuracy  : {acc:.4f}\n")
+        f.write(f"Precision : {prec:.4f}\n")
+        f.write(f"Recall    : {rec:.4f}\n")
+        f.write(f"F1        : {f1:.4f}\n")
+        f.write(f"Kappa     : {kappa:.4f}\n")
+
+    print(
+        f"Loss={avg_loss:.4f} | Acc={acc:.4f} | "
+        f"Prec={prec:.4f} | Rec={rec:.4f} | F1={f1:.4f} | κ={kappa:.4f}"
+    )
+
+    return acc, prec, rec, f1, kappa

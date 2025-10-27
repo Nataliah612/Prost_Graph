@@ -10,7 +10,7 @@ from torchvision import transforms as T
 import gc
 from tqdm import tqdm
 
-def create_file_label_df(embedding_path, data_path, slide_col='image_id'):
+def create_file_label_df(embedding_path, data_path,slide_col = 'image_id', NAME=''):
     features_list = []
     labels_list = []
     patient_list = []
@@ -23,7 +23,7 @@ def create_file_label_df(embedding_path, data_path, slide_col='image_id'):
     # Agrega tqdm aquí
     for f in tqdm(embeddings, desc="Procesando embeddings"):
         slide_id = f.split('.npy')[0]
-        if slide_col == 'slide_id':
+        if NAME == 'SICAP':
             slide_id = slide_id.split('_')[0]
         row = df[df[slide_col] == slide_id]
 
@@ -97,7 +97,7 @@ class RandomDataset(Dataset):
         self.features = []
         self.labels = []
 
-        for i in indices:
+        for i in tqdm(indices, desc="Cargando features"):
             row = self.dataframe.iloc[i]
             label1 = row['gleason_primary']
             label2 = row['gleason_secondary']
