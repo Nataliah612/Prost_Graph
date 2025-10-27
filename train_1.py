@@ -13,7 +13,7 @@ from tqdm import tqdm
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 
 # =============== IMPORT FUNCIONES ======================
-from models.model_1graph import model_gat, device, weights_init
+from models.model_1graph import model_graph, device, weights_init
 from utils.data_load import create_file_label_df, CustomDataset,RandomDataset, collate_fn
 from utils.utils import FocalLoss, compute_class_weights, compute_metrics
 
@@ -24,7 +24,7 @@ gc.collect()
 # =================== CONFIGURACIÓN ===================
 BASE_PATH = "/workspace/results"
 MODEL_TYPE = 3
-LEARNING_RATES = [1e-5, 1e-6]#, 1e-5, 1e-6,1e-4]
+LEARNING_RATES = [1e-3,1e-4,1e-5]#, 1e-5, 1e-6,1e-4]
 EPOCHS_RANGE = [100]
 BATCH_SIZES = [128]#, 128, 64,32]
 PATIENCE = 20
@@ -39,8 +39,8 @@ print(f"✅ Usando dispositivo: {device}")
 
 # =================== FUNCIONES AUXILIARES ===================
 def load_model(type_id, name):
-    model_map = {3: (model_gat, name)}
-    model_fn, path = model_map.get(type_id, (model_gat, 'other'))
+    model_map = {3: (model_graph, name)}
+    model_fn, path = model_map.get(type_id, (model_graph, 'other'))
     model = model_fn()
     model = torch.nn.SyncBatchNorm.convert_sync_batchnorm(model)
     model = model.to(device)

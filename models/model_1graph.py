@@ -81,8 +81,6 @@ def build_attention_graph(node_features, adj_model, k=8, exclude_self=True):
 
     return edge_index.long(), edge_attr.float()
 
-
-
 class adj(nn.Module):
     def __init__(self):
         super(adj, self).__init__()
@@ -125,53 +123,24 @@ class AttentionalAggregation2(Aggregation):
             shape :obj:`[-1, in_channels]` to shape :obj:`[-1, 1]` (for
             node-level gating) or :obj:`[1, out_channels]` (for feature-level
             gating), *e.g.*, defined by :class:`torch.nn.Sequential`.
-        nn (torch.nn.Module, optional): A neural network
-            :math:`h_{\mathbf{\Theta}}` that maps node features :obj:`x` of
-            shape :obj:`[-1, in_channels]` to shape :obj:`[-1, out_channels]`
-            before combining them with the attention scores, *e.g.*, defined by
-            :class:`torch.nn.Sequential`. (default: :obj:`None`)
     """
-    def __init__(
-        self,
-        gate_nn: torch.nn.Module,
-        nn: Optional[torch.nn.Module] = None,
-    ):
+    def __init__(self,gate_nn: torch.nn.Module):
         super().__init__()
-
-        self.gate_nn = self.gate_mlp = None
-        if isinstance(gate_nn, MLP):
-            self.gate_mlp = gate_nn
-        else:
-            self.gate_nn = gate_nn
-
-        self.nn = self.mlp = None
-        if isinstance(nn, MLP):
-            self.mlp = nn
-        else:
-            self.nn = nn
+      
+        self.gate_nn = gate_nn
 
     def forward(self, x: Tensor, index: Optional[Tensor] = None,
                 ptr: Optional[Tensor] = None, dim_size: Optional[int] = None,
                 dim: int = -2, batch:Optional[Tensor] = None) -> Tensor:
 
-        if self.gate_mlp is not None:
-            gate = self.gate_mlp(x, batch=index, batch_size=dim_size)
-        else:
-            gate = self.gate_nn(x)
-
-        if self.mlp is not None:
-            x = self.mlp(x, batch=index, batch_size=dim_size)
-        elif self.nn is not None:
-            x = self.nn(x)
-
+        gate = self.gate_nn(x)
         gate = torch.softmax(gate, dim=dim) 
         h = gate*x
         return h, gate
 
     def __repr__(self) -> str:
         return (f'{self.__class__.__name__}('
-                f'gate_nn={self.gate_mlp or self.gate_nn}, '
-                f'nn={self.mlp or self.nn})')
+                f'gate_nn={self.gate_nn}')
     
 class gat(torch.nn.Module):
     def __init__(self, heads=4):
@@ -192,9 +161,9 @@ class gat(torch.nn.Module):
         
         x = x.float()
 
-        x=self.pool(x, batch)
-  
-        return x
+        x, w=self.pool(x, batch)
+        x = torch.sum(x,dim=0)
+        return x, w
 
 
 class mlp(nn.Module):
@@ -211,7 +180,7 @@ class mlp(nn.Module):
         self.dropout = nn.Dropout(0.3)  # Regularización
 
         self.fc4_primary = nn.Linear(64, 4)
-        #self.fc4_secondary = nn.Linear(64, 4)
+     
 
     def forward(self, x):
         x = self.fc1(x)
@@ -225,55 +194,49 @@ class mlp(nn.Module):
         x = self.dropout(x)
 
         x1 = self.fc4_primary(x)
-        #probs = torch.sigmoid(x1)   # ← activación sigmoide en la salida
-        #x2 = self.fc4_secondary(x)
+       
 
         return x1 #x1, x2
 
-class model_gat(nn.Module):
+class model_graph(nn.Module):
     def __init__(self):
-        super(model_gat, self).__init__()
-        self.graphgat = gat()
-        self.mlp_out = mlp()
-        self.adj = adj()
-    def forward(self, fea_o, batch_size_gnn=2):
-        batch_size, max_nodes, feature_dim = fea_o.shape
+        super(model_graph, self).__init__()
+        self.graphgat1 = gat()  
+        self.mlp_out1 = mlp()
+        self.graphgat2 = gat()
+        self.mlp_out2 = mlp()
+        self.adj1 = adj()
+        self.adj2 = adj()
 
+    def forward(self, fea_o, y = None):
         valid_nodes_mask = (fea_o.sum(-1) != 0)
-        num_els = valid_nodes_mask.sum(dim=1).int()  # (B,)
+        num_els = valid_nodes_mask.sum(dim=1).int()  # Guarda los valores de nº de nodos validos
+        valid_node_indices = [mask.nonzero(as_tuple=True)[0].tolist() for mask in valid_nodes_mask] # Guarda las posiciones de los nodos validos
 
-        data_list = []
+        all_outputs1= []
+        all_weights1 = []
 
         for b, nel in enumerate(num_els.tolist()):
             if nel == 0:
                 continue
-
-            x = fea_o[b, :nel]  # (nel, feature_dim)
+            ind = valid_node_indices[b]
+            x = fea_o[b, ind] #Seleccion de los nodos validos segun sus indices 
 
             # Usar el módulo adj para construir grafo con atención
-            edge_index, edge_attr = build_attention_graph(x, self.adj, k=8)
+            edge_index1, edge_attr1 = build_attention_graph(x, self.adj1, k=8)
 
-            data_list.append(data.Data(x=x, edge_index=edge_index, edge_attr=edge_attr))
+            data_list1=data.Data(x=x, edge_index=edge_index1, edge_attr=edge_attr1)
+           
+            out1, w1= self.graphgat1(data_list1)  
+            w1 = w1.view(-1)
+            all_weights1.append(w1)
 
-        if not data_list:
-            raise ValueError("No valid graphs found in batch")
+            all_outputs1.append(out1)
 
-        all_outputs = []
-        all_labels = []
+        all_outputs1 = torch.stack(all_outputs1)
 
-        # Procesar en mini-batches de grafos
-        for i in range(0, len(data_list), batch_size_gnn):
-            batch_graphs = data_list[i:i + batch_size_gnn]
-            g_batch = data.Batch.from_data_list(batch_graphs)
-            out = self.graphgat(g_batch)  # (batch_size_gnn, hidden_dim)
-            all_outputs.append(out)
-            all_labels.append(g_batch.y)
-
-        bf_x = torch.cat(all_outputs, dim=0)  # (total_graphs, hidden_dim)
-
-        # Pasar todo por el MLP directamente
-        x1 = self.mlp_out(bf_x)
-
+        x1 = self.mlp_out1(all_outputs1)
+     
         return x1
 
 def weights_init(m):
