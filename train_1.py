@@ -15,18 +15,18 @@ from torch.optim.lr_scheduler import ReduceLROnPlateau
 # =============== IMPORT FUNCIONES ======================
 from models.model_1graph import model_graph, device, weights_init
 from utils.data_load import create_file_label_df, CustomDataset,RandomDataset, collate_fn
-from utils.utils import FocalLoss, compute_class_weights, compute_metrics
+from utils.utils import compute_metrics
 
 
 os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "max_split_size_mb:128"
 gc.collect()
 
 # =================== CONFIGURACIÓN ===================
-BASE_PATH = "/workspace/results"
+BASE_PATH = "/workspace/results/1graph"
 MODEL_TYPE = 3
 LEARNING_RATES = [1e-3,1e-4,1e-5]#, 1e-5, 1e-6,1e-4]
 EPOCHS_RANGE = [100]
-BATCH_SIZES = [16]#, 128, 64,32]
+BATCH_SIZES = [128]#, 128, 64,32]
 PATIENCE = 20
 RANDOM_SEED = 98
 
@@ -64,9 +64,11 @@ def train_and_evaluate(model, model_id, model_path, params, paths):
     
     print("Preparing Data ...")
 
-    label_mapping = {0: 0, 3: 1, 4: 2, 5: 3}
-
     df_train = create_file_label_df(paths["embedding_path"], paths["data_path"])
+    label_mapping = {0: 0, 1: 0, 2: 0, 3: 1, 4: 2, 5: 3}
+
+    df_train['gleason_primary_mapped'] = df_train['gleason_primary'].map(label_mapping)
+    df_train['gleason_secondary_mapped'] = df_train['gleason_secondary'].map(label_mapping)
 
     train_val_idx, test_idx = train_test_split(
         df_train.index, test_size=0.15,

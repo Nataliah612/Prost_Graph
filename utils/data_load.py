@@ -68,7 +68,7 @@ class CustomDataset(Dataset):
             self.features.append(torch.tensor(features))
 
             labels= torch.tensor(
-                [row['gleason_primary'], row['gleason_secondary']],
+                [row['gleason_primary_mapped'], row['gleason_secondary_mapped']],
                 dtype=torch.long
             )
             self.labels.append(labels)

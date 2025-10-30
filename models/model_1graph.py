@@ -151,7 +151,7 @@ class Attention(nn.Module):
                 f'gate_nn={self.gate_nn}')
                 '''
 
-class Aggregate_Attnt(Aggregation):
+class Aggregate_Attnt(nn.Module):
     r"""Args:
         gate_nn (torch.nn.Module): A neural network :math:`h_{\mathrm{gate}}`
             that computes attention scores by mapping node features :obj:`x` of
@@ -171,8 +171,9 @@ class Aggregate_Attnt(Aggregation):
             nn.Linear(L,D), 
             nn.Sigmoid())
         self.branch_3= nn.Linear(D,I)
+        weights_init(self)
 
-    def forward(self, x: Tensor, dim: int = -2) -> Tensor:
+    def forward(self, x: Tensor,dim: int = -2): 
 
         # Weights calculation 
         xa = self.branch_1(x)
@@ -180,24 +181,22 @@ class Aggregate_Attnt(Aggregation):
         A = xa.mul(xb)
         A = self.branch_3(A) 
 
-        #gate = self.gate_nn(A)
-        gate = torch.softmax(A, dim=dim) 
-        #h = gate*x
+        gate = torch.softmax(A, dim=0) 
+
         return gate
 
-    def __repr__(self) -> str:
-        return (f'{self.__class__.__name__}('
-                f'gate_nn={self.gate_nn}')
+  
     
 class gat(torch.nn.Module):
     def __init__(self, heads=4):
         super(gat,self).__init__()
 
-        self.gat1 = GATConv(768, 512, heads=heads, edge_dim = 1, concat=False)
-        self.gat2 = GATConv(512, 256, heads=heads, edge_dim = 1,concat=False)
+        self.gat1 = GATConv(768, 256, heads=heads, edge_dim = 1, concat=False)
+        self.gat2 = GATConv(256, 64, heads=heads, edge_dim = 1,concat=False)
         #att_net = nn.Sequential(nn.Linear(256, 128), nn.ReLU(), nn.Linear(128, 64), nn.ReLU(), nn.Linear(64, 1),nn.Tanh())
         #att_net = Attention()
-        self.pool = Aggregate_Attnt(L = 512,I = 1)
+        self.Aggr = Aggregate_Attnt(L = 768,I = 1)
+        self.fc = nn.Linear(64, 4)
        
     def forward(self,data):
         x, edge_index, edge_weight, batch = data.x, data.edge_index, data.edge_attr,data.batch
@@ -209,8 +208,11 @@ class gat(torch.nn.Module):
         
         x2 = x2.float()
 
-        w=self.pool(x1, batch)
+        w=self.Aggr(x, batch)
+
         x = torch.sum(w*x2,dim=0)
+        x = self.fc(x)
+
         return x, w
 
 
@@ -271,7 +273,7 @@ class model_graph(nn.Module):
             x = fea_o[b, ind] #Seleccion de los nodos validos segun sus indices 
 
             # Usar el módulo adj para construir grafo con atención
-            edge_index1, edge_attr1 = build_attention_graph(x, self.adj1, k=40)
+            edge_index1, edge_attr1 = build_attention_graph(x, self.adj1, k=20)
 
             data_list1=data.Data(x=x, edge_index=edge_index1, edge_attr=edge_attr1)
            
@@ -283,9 +285,9 @@ class model_graph(nn.Module):
 
         all_outputs1 = torch.stack(all_outputs1)
 
-        x1 = self.mlp_out1(all_outputs1)
+        #x1 = self.mlp_out1(all_outputs1)
      
-        return x1
+        return all_outputs1
 
 def weights_init(m):
     if isinstance(m, nn.Linear):
