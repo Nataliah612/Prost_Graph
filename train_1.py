@@ -26,7 +26,7 @@ BASE_PATH = "/workspace/results"
 MODEL_TYPE = 3
 LEARNING_RATES = [1e-3,1e-4,1e-5]#, 1e-5, 1e-6,1e-4]
 EPOCHS_RANGE = [100]
-BATCH_SIZES = [128]#, 128, 64,32]
+BATCH_SIZES = [16]#, 128, 64,32]
 PATIENCE = 20
 RANDOM_SEED = 98
 
@@ -81,7 +81,7 @@ def train_and_evaluate(model, model_id, model_path, params, paths):
     print("Loading embeddings for Training ...")
     data_train = RandomDataset(df_train, train_idx, len_subset=5000)
 
-    train_loader = DataLoader(data_train,
+    train_loader = DataLoader(CustomDataset(df_train, train_idx), #data_train,
                               batch_size=params["batch"],
                               shuffle=True,  collate_fn=collate_fn)
     print("Loading embeddings for Validation ...")
@@ -94,11 +94,11 @@ def train_and_evaluate(model, model_id, model_path, params, paths):
                             shuffle=False, collate_fn=collate_fn)
 
     # ------------ perdidas y optimizadores ------------------------
-    w_class1  = compute_class_weights(df_train["gleason_primary"])
-    w_class2  = compute_class_weights(df_train["gleason_secondary"])
+    #w_class1  = compute_class_weights(df_train["gleason_primary"])
+    #w_class2  = compute_class_weights(df_train["gleason_secondary"])
 
-    loss_fn1  = nn.CrossEntropyLoss(weight= w_class1) #FocalLoss(weight=w_class1, gamma=2.0)
-    loss_fn2  = nn.CrossEntropyLoss(weight= w_class2) #FocalLoss(weight=w_class2, gamma=2.0)
+    #loss_fn1  = nn.CrossEntropyLoss(weight= w_class1) #FocalLoss(weight=w_class1, gamma=2.0)
+    #loss_fn2  = nn.CrossEntropyLoss(weight= w_class2) #FocalLoss(weight=w_class2, gamma=2.0)
     loss_sigm = nn.BCEWithLogitsLoss()
 
     model.apply(weights_init)
@@ -126,11 +126,12 @@ def train_and_evaluate(model, model_id, model_path, params, paths):
 
         for inputs, y in tqdm(train_loader, desc="Training"):
             
-            y = torch.tensor([[label_mapping[int(v.item())] for v in row] for row in y],
-                        device=device)
+            #y = torch.tensor([[label_mapping[int(v.item())] for v in row] for row in y], device=device)
+            y = y.to(device)
 
             y_onehot = torch.zeros(y.shape[0], 4).to(device)
             y_onehot.scatter_(1, y, 1)  
+
             out1 = model(inputs.to(device))
             loss = loss_sigm(out1,y_onehot.to(device))
 
@@ -160,9 +161,8 @@ def train_and_evaluate(model, model_id, model_path, params, paths):
 
         with torch.no_grad():
             for inputs, y in tqdm(val_loader, desc="Validation"):
-
-                y = torch.tensor([[label_mapping[int(v.item())] for v in row] for row in y],
-                        device=device)
+                y = y.to(device)
+                #y = torch.tensor([[label_mapping[int(v.item())] for v in row] for row in y],device=device)
 
                 y_onehot = torch.zeros(y.shape[0], 4).to(device)
                 y_onehot.scatter_(1, y, 1)  
@@ -218,8 +218,8 @@ def train_and_evaluate(model, model_id, model_path, params, paths):
     all_y1, all_p1 = [],[]
     with torch.no_grad():
         for inputs, y in tqdm(test_loader, desc="Test"):
-            y = torch.tensor([[label_mapping[int(v.item())] for v in row] for row in y],
-                    device=device)
+            #y = torch.tensor([[label_mapping[int(v.item())] for v in row] for row in y],device=device)
+            y = y.to(device)
 
             y_onehot = torch.zeros(y.shape[0], 4).to(device)
             y_onehot.scatter_(1, y.to(device), 1)  
@@ -245,10 +245,14 @@ def train_and_evaluate(model, model_id, model_path, params, paths):
 
     g_ty_sum = torch.cat(all_y1)[:test_seen]
     g_tp_sum = torch.cat(all_p1)[:test_seen]
-    test_kappa = compute_metrics(g_ty_sum, g_tp_sum)[-1]       
+
+    test_kappa = compute_metrics(g_ty_sum, g_tp_sum)[-1] 
+    accuracy_score, precision_score,recall_score,f1_score = compute_metrics(g_ty_sum, g_tp_sum)
+         
     print(f"Test Loss: {test_loss[0]:.4f} Acc: {test_acc[0]:.4f} Kappa: {test_kappa:.4f}")
     with open(paths['output_file'], "a") as f:
         f.write(  f" Test Loss: {test_loss[0]:.4f}       Acc: {test_acc[0]:.4f}   Kappa: {test_kappa:.4f}\n")
+        f.write(  f"Acuracy: {accuracy_score}, | Precision: {precision_score} | Recall : {recall_score}| F1 Score: {f1_score}")
 
 # =============== EJECUCIÓN ===================
 if __name__ == "__main__":

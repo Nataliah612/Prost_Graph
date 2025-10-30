@@ -3,11 +3,10 @@ import torch.nn as nn
 import torch.nn.init
 import torch.nn.functional as F
 from torch_geometric import data
-from torch_geometric.nn import GATConv, AttentionalAggregation, AGNNConv
+from torch_geometric.nn import GATConv
 
 from torch import Tensor
-from torch_geometric.nn import MLP
-from typing import Optional
+
 from torch_geometric.nn.aggr import Aggregation
 
 import os
@@ -98,9 +97,10 @@ class adj(nn.Module):
         return torch.sigmoid(self.mlp(pair))  # (E, 1)
 
 class Attention(nn.Module):
-    def __init__(self, L = 512, D = 256, I = 1):
+    def __init__(self, L = 512, I = 1):
         super().__init__()
         '''Codigo de: (AtriiMIL)'''
+        D = L//2
         self.branch_1 = nn.Sequential(
             nn.Linear(L,D), 
             nn.Tanh())
@@ -116,7 +116,7 @@ class Attention(nn.Module):
         A = self.branch_3(A) 
         return A
     
-class AttentionalAggregation2(Aggregation):
+'''class AttentionalAggregation2(Aggregation):
     r"""Args:
         gate_nn (torch.nn.Module): A neural network :math:`h_{\mathrm{gate}}`
             that computes attention scores by mapping node features :obj:`x` of
@@ -127,7 +127,15 @@ class AttentionalAggregation2(Aggregation):
     def __init__(self,gate_nn: torch.nn.Module):
         super().__init__()
       
-        self.gate_nn = gate_nn
+        #self.gate_nn = gate_nn
+        D = L//2
+        self.branch_1 = nn.Sequential(
+            nn.Linear(L,D), 
+            nn.Tanh())
+        self.branch_2 = nn.Sequential(
+            nn.Linear(L,D), 
+            nn.Sigmoid())
+        self.branch_3= nn.Linear(D,I)
 
     def forward(self, x: Tensor, index: Optional[Tensor] = None,
                 ptr: Optional[Tensor] = None, dim_size: Optional[int] = None,
@@ -135,8 +143,47 @@ class AttentionalAggregation2(Aggregation):
 
         gate = self.gate_nn(x)
         gate = torch.softmax(gate, dim=dim) 
-        h = gate*x
-        return h, gate
+        #h = gate*x
+        return gate
+
+    def __repr__(self) -> str:
+        return (f'{self.__class__.__name__}('
+                f'gate_nn={self.gate_nn}')
+                '''
+
+class Aggregate_Attnt(Aggregation):
+    r"""Args:
+        gate_nn (torch.nn.Module): A neural network :math:`h_{\mathrm{gate}}`
+            that computes attention scores by mapping node features :obj:`x` of
+            shape :obj:`[-1, in_channels]` to shape :obj:`[-1, 1]` (for
+            node-level gating) or :obj:`[1, out_channels]` (for feature-level
+            gating), *e.g.*, defined by :class:`torch.nn.Sequential`.
+    """
+    def __init__(self,L=512,I=1):
+        super().__init__()
+      
+        #self.gate_nn = gate_nn
+        D = L//2
+        self.branch_1 = nn.Sequential(
+            nn.Linear(L,D), 
+            nn.Tanh())
+        self.branch_2 = nn.Sequential(
+            nn.Linear(L,D), 
+            nn.Sigmoid())
+        self.branch_3= nn.Linear(D,I)
+
+    def forward(self, x: Tensor, dim: int = -2) -> Tensor:
+
+        # Weights calculation 
+        xa = self.branch_1(x)
+        xb = self.branch_2(x)
+        A = xa.mul(xb)
+        A = self.branch_3(A) 
+
+        #gate = self.gate_nn(A)
+        gate = torch.softmax(A, dim=dim) 
+        #h = gate*x
+        return gate
 
     def __repr__(self) -> str:
         return (f'{self.__class__.__name__}('
@@ -147,22 +194,23 @@ class gat(torch.nn.Module):
         super(gat,self).__init__()
 
         self.gat1 = GATConv(768, 512, heads=heads, edge_dim = 1, concat=False)
-        self.gat2 = GATConv(512, 64, heads=heads, edge_dim = 1)
+        self.gat2 = GATConv(512, 256, heads=heads, edge_dim = 1,concat=False)
         #att_net = nn.Sequential(nn.Linear(256, 128), nn.ReLU(), nn.Linear(128, 64), nn.ReLU(), nn.Linear(64, 1),nn.Tanh())
-        att_net = Attention(256,128,1)
-        self.pool = AttentionalAggregation2(att_net)
+        #att_net = Attention()
+        self.pool = Aggregate_Attnt(L = 512,I = 1)
        
     def forward(self,data):
         x, edge_index, edge_weight, batch = data.x, data.edge_index, data.edge_attr,data.batch
         edge_index= edge_index.to(x.device)
-        x, _ = self.gat1(x, edge_index, edge_weight, return_attention_weights=False)
-        x = F.relu(x)
-        x, _ = self.gat2(x, edge_index, edge_weight, return_attention_weights=False)
-        
-        x = x.float()
 
-        x, w=self.pool(x, batch)
-        x = torch.sum(x,dim=0)
+        x1, _ = self.gat1(x, edge_index, edge_weight, return_attention_weights=False)
+        x1 = F.relu(x1)
+        x2, _ = self.gat2(x1, edge_index, edge_weight, return_attention_weights=False)
+        
+        x2 = x2.float()
+
+        w=self.pool(x1, batch)
+        x = torch.sum(w*x2,dim=0)
         return x, w
 
 
@@ -223,7 +271,7 @@ class model_graph(nn.Module):
             x = fea_o[b, ind] #Seleccion de los nodos validos segun sus indices 
 
             # Usar el módulo adj para construir grafo con atención
-            edge_index1, edge_attr1 = build_attention_graph(x, self.adj1, k=8)
+            edge_index1, edge_attr1 = build_attention_graph(x, self.adj1, k=40)
 
             data_list1=data.Data(x=x, edge_index=edge_index1, edge_attr=edge_attr1)
            
