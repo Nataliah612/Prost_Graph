@@ -24,7 +24,7 @@ gc.collect()
 # =================== CONFIGURACIÓN ===================
 BASE_PATH = "/workspace/results/1graph"
 MODEL_TYPE = 3
-LEARNING_RATES = [1e-3,1e-4,1e-5]#, 1e-5, 1e-6,1e-4]
+LEARNING_RATES = [1e-3]#, 1e-5, 1e-6,1e-4]
 EPOCHS_RANGE = [100]
 BATCH_SIZES = [128]#, 128, 64,32]
 PATIENCE = 20
@@ -249,12 +249,12 @@ def train_and_evaluate(model, model_id, model_path, params, paths):
     g_tp_sum = torch.cat(all_p1)[:test_seen]
 
     test_kappa = compute_metrics(g_ty_sum, g_tp_sum)[-1] 
-    accuracy_score, precision_score,recall_score,f1_score = compute_metrics(g_ty_sum, g_tp_sum)
+    metrics = compute_metrics(g_ty_sum, g_tp_sum)
          
     print(f"Test Loss: {test_loss[0]:.4f} Acc: {test_acc[0]:.4f} Kappa: {test_kappa:.4f}")
     with open(paths['output_file'], "a") as f:
         f.write(  f" Test Loss: {test_loss[0]:.4f}       Acc: {test_acc[0]:.4f}   Kappa: {test_kappa:.4f}\n")
-        f.write(  f"Acuracy: {accuracy_score}, | Precision: {precision_score} | Recall : {recall_score}| F1 Score: {f1_score}")
+        f.write(  f"Acuracy: {metrics[0]}, | Precision: {metrics[1]} | Recall : {metrics[2]}| F1 Score: {metrics[3]}")
 
 # =============== EJECUCIÓN ===================
 if __name__ == "__main__":
