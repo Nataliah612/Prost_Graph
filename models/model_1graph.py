@@ -96,68 +96,11 @@ class adj(nn.Module):
         pair = torch.cat([node_i, node_j], dim=-1)  # (E, 768*2)
         return torch.sigmoid(self.mlp(pair))  # (E, 1)
 
-class Attention(nn.Module):
-    def __init__(self, L = 512, I = 1):
-        super().__init__()
-        '''Codigo de: (AtriiMIL)'''
-        D = L//2
-        self.branch_1 = nn.Sequential(
-            nn.Linear(L,D), 
-            nn.Tanh())
-        self.branch_2 = nn.Sequential(
-            nn.Linear(L,D), 
-            nn.Sigmoid())
-        self.branch_3= nn.Linear(D,I)
-        
-    def forward(self, x): 
-        xa = self.branch_1(x)
-        xb = self.branch_2(x)
-        A = xa.mul(xb)
-        A = self.branch_3(A) 
-        return A
-    
-'''class AttentionalAggregation2(Aggregation):
-    r"""Args:
-        gate_nn (torch.nn.Module): A neural network :math:`h_{\mathrm{gate}}`
-            that computes attention scores by mapping node features :obj:`x` of
-            shape :obj:`[-1, in_channels]` to shape :obj:`[-1, 1]` (for
-            node-level gating) or :obj:`[1, out_channels]` (for feature-level
-            gating), *e.g.*, defined by :class:`torch.nn.Sequential`.
-    """
-    def __init__(self,gate_nn: torch.nn.Module):
-        super().__init__()
-      
-        #self.gate_nn = gate_nn
-        D = L//2
-        self.branch_1 = nn.Sequential(
-            nn.Linear(L,D), 
-            nn.Tanh())
-        self.branch_2 = nn.Sequential(
-            nn.Linear(L,D), 
-            nn.Sigmoid())
-        self.branch_3= nn.Linear(D,I)
-
-    def forward(self, x: Tensor, index: Optional[Tensor] = None,
-                ptr: Optional[Tensor] = None, dim_size: Optional[int] = None,
-                dim: int = -2, batch:Optional[Tensor] = None) -> Tensor:
-
-        gate = self.gate_nn(x)
-        gate = torch.softmax(gate, dim=dim) 
-        #h = gate*x
-        return gate
-
-    def __repr__(self) -> str:
-        return (f'{self.__class__.__name__}('
-                f'gate_nn={self.gate_nn}')
-                '''
 
 class Aggregate_Attnt(nn.Module):
     r"""Args:
-        gate_nn (torch.nn.Module): A neural network :math:`h_{\mathrm{gate}}`
-            that computes attention scores by mapping node features :obj:`x` of
-            shape :obj:`[-1, in_channels]` to shape :obj:`[-1, 1]` (for
-            node-level gating) or :obj:`[1, out_channels]` (for feature-level
-            gating), *e.g.*, defined by :class:`torch.nn.Sequential`.
+        L (int): Dimensión de la entrada
+        I (int): Dimensión de la salida
     """
     def __init__(self,L=512,I=1):
         super().__init__()
@@ -188,7 +131,7 @@ class Aggregate_Attnt(nn.Module):
   
     
 class gat(torch.nn.Module):
-    def __init__(self, heads=4):
+    def __init__(self, heads=8):
         super(gat,self).__init__()
 
         self.gat1 = GATConv(768, 256, heads=heads, edge_dim = 1, concat=False)
@@ -211,7 +154,7 @@ class gat(torch.nn.Module):
         w=self.Aggr(x, batch)
 
         x = torch.sum(w*x2,dim=0)
-        x = self.fc(x)
+        #x = self.fc(x)
 
         return x, w
 
@@ -273,7 +216,7 @@ class model_graph(nn.Module):
             x = fea_o[b, ind] #Seleccion de los nodos validos segun sus indices 
 
             # Usar el módulo adj para construir grafo con atención
-            edge_index1, edge_attr1 = build_attention_graph(x, self.adj1, k=20)
+            edge_index1, edge_attr1 = build_attention_graph(x, self.adj1, k=30)
 
             data_list1=data.Data(x=x, edge_index=edge_index1, edge_attr=edge_attr1)
            
@@ -285,9 +228,9 @@ class model_graph(nn.Module):
 
         all_outputs1 = torch.stack(all_outputs1)
 
-        #x1 = self.mlp_out1(all_outputs1)
+        x1 = self.mlp_out1(all_outputs1)
      
-        return all_outputs1
+        return x1
 
 def weights_init(m):
     if isinstance(m, nn.Linear):
