@@ -6,40 +6,46 @@ import pandas as pd
 import torch
 from torch.utils.data import Dataset
 from torchvision import transforms as T
+from PIL import Image
+import h5py
 
 import gc
 from tqdm import tqdm
+import sys
 
-def create_file_label_df(embedding_path, data_path,slide_col = 'image_id', NAME=''):
+def create_file_label_df(patch_path, data_path,slide_col = 'image_id', NAME=''):
     features_list = []
+    patient_list = []
     gleason_score = []
     gleason_primary_list = []
     gleason_secondary_list = []
 
     df = pd.read_excel(data_path)
-    #df = df.head(1000)
+    df = df.head(100)
 
-    embeddings = [f for f in os.listdir(embedding_path) if f.endswith('.npy')]
+    patches = [f for f in os.listdir(patch_path) if f.endswith('.h5')]
 
     # Agrega tqdm aquí
-    for f in tqdm(embeddings, desc="Reading DataFrame"):
-        slide_id = f.split('.npy')[0]
+    for f in tqdm(patches, desc="Reading DataFrame"):
+        slide_id = f.split('.h5')[0]
         if NAME == 'SICAP':
             slide_id = slide_id.split('_')[0]
         row = df[df[slide_col] == slide_id]
 
         if not row.empty:
-            ruta_npy = os.path.join(embedding_path, f)
-
+            ruta_h5 = os.path.join(patch_path, f)
+            features_list.append(ruta_h5)
             gleason = row[['gleason_score']].values
-
+            patient = row['patient_id'].values if 'patient_id' in row else row[slide_col].values
+            
             gleason_score.append(gleason.item())
-            features_list.append(ruta_npy)
+            patient_list.append(patient)
             gleason_primary_list.append(row['gleason_primary'].values[0])
             gleason_secondary_list.append(row['gleason_secondary'].values[0])
 
     df_train = pd.DataFrame({
         'features': features_list,
+        'patients': patient_list,
         'gleason_score': gleason_score,
         'gleason_primary': gleason_primary_list,
         'gleason_secondary': gleason_secondary_list
@@ -47,98 +53,93 @@ def create_file_label_df(embedding_path, data_path,slide_col = 'image_id', NAME=
 
     return df_train
     
-class CustomDataset(Dataset):
-    def __init__(self, dataframe, indices):
-        """
-        Args:
-            dataframe (pd.DataFrame): El dataframe que contiene las características y las etiquetas.
-            indices (list): Lista de índices que especifican qué filas del dataframe utilizar.
-        """
+class RAM_WSI_Dataset(Dataset):
+    """
+    Dataset de WSI (Whole Slide Images) con imágenes precargadas en RAM.
+
+    Args:
+        dataframe (pd.DataFrame): DataFrame con columnas
+            'gleason_primary_mapped', 'gleason_secondary_mapped' y 'features' (ruta al .h5).
+        indices (list[int]): Lista de índices del DataFrame que se cargarán en memoria.
+        random_subsets (bool): Si True, en cada época se usa un subset aleatorio de tamaño len_subset.
+                               Si False, se usa todo el dataset (validación/test).
+        len_subset (int): Tamaño del subset aleatorio que se usará en cada época.
+                          Si es mayor que el total, se ajusta automáticamente.
+    """
+    def __init__(self, dataframe, indices, random_subsets=False, len_subset=1000):
         gc.collect()
         self.dataframe = dataframe
-        self.indices = indices  # Almacena los índices proporcionados
-        self.labels = []
-        self.features = []
+        self.indices = list(indices)
+        self.random_subsets = bool(random_subsets)
 
-        for i in tqdm(indices, desc="Cargando features"):
+        # Ajustar tamaño del subset
+        if self.random_subsets:
+            self.len_subset = min(int(len_subset), len(self.indices))
+        else:
+            self.len_subset = len(self.indices)
+
+        # Transformaciones básicas
+        self.transform = T.Compose([
+            T.ToTensor(),
+            T.Resize((224, 224)),
+            T.Normalize(mean=[0.5, 0.5, 0.5],
+                        std=[0.5, 0.5, 0.5])
+        ])
+
+        # Precargar imágenes y etiquetas en RAM
+        self.images, self.labels = [], []
+        for i in tqdm(self.indices, desc="Loading WSI", file=sys.stdout):
             row = self.dataframe.iloc[i]
-
-            features = row['features']
-            features = np.load(features, mmap_mode='r')
-            self.features.append(torch.tensor(features))
-
-            labels= torch.tensor(
+            label = torch.tensor(
                 [row['gleason_primary_mapped'], row['gleason_secondary_mapped']],
                 dtype=torch.long
             )
-            self.labels.append(labels)
+            self.labels.append(label)
 
-    def __getitem__(self, idx):
-        
-        return self.features[idx], self.labels[idx]
+            features_path = row['features']
+            with h5py.File(features_path, "r", swmr=True) as h5_file:
+                imgs = h5_file["imgs"][:]  # numpy array [num_imgs, H, W, C]
 
-    def __len__(self):
-        return len(self.indices)
-        
-class RandomDataset(Dataset):
-    def __init__(self, dataframe, indices,len_subset=1000,small_dataset_for_test = False):
-        """
-        Args:
-            dataframe: pd.DataFrame con una columna 'features' que contiene rutas a .h5
-            indices: lista de índices (filas del dataframe) que forman el universo
-            len_subset: tamaño del subset aleatorio por época
-        """
-        gc.collect()
-        self.dataframe = dataframe
-        self.indices = list(indices) 
-        self.len_subset = int(len_subset)
+            imgs_tensor = torch.stack([
+                self.transform(Image.fromarray(img)) for img in imgs
+            ])
+            self.images.append(imgs_tensor)
 
-        self.features = []
-        self.labels = []
+        # Mapeo índice original → posición en listas cargadas
+        self.idx2pos = {orig_idx: pos for pos, orig_idx in enumerate(self.indices)}
 
-        for i in tqdm(indices, desc="Cargando features"):
-            row = self.dataframe.iloc[i]
-            label1 = row['gleason_primary']
-            label2 = row['gleason_secondary']
-            self.labels.append(torch.tensor([label1, label2], dtype=torch.long))
-            
-            features = np.load(row['features'], mmap_mode='r')
-            
-            # Aplicamos transform a cada imagen
-            self.features.append(torch.tensor(features))
+        # Inicializar subset
+        if self.random_subsets:
+            self.ind_subset = None
+            self.update_random_subset()
+        else:
+            self.ind_subset = self.indices
 
-        # Inicializa ind_subset (hay que llamar update_random_list() antes de usar)
-        self.ind_subset = None
-        self.update_random_list()
+    def update_random_subset(self):
+        """Genera un nuevo subset aleatorio (sin reemplazo)."""
+        if self.random_subsets:
+            self.ind_subset = np.random.choice(self.indices, self.len_subset, replace=False)  
 
-    def update_random_list(self):
-        """Genera nuevos índices aleatorios para el subset."""
+    def get_current_subset_indices(self):
+        """Devuelve la lista actual de índices del DataFrame usados en esta época."""
+        return list(self.ind_subset)
 
-        self.ind_subset = np.random.choice(self.indices, self.len_subset, replace=True) # Generar indices aleatorios 
-
-    def get_current_indices(self):
-        """Devuelve la lista de índices usados en esta época, indices originales del dataframe"""
-
-        return self.ind_subset.tolist()
-    
     def __len__(self):
         return len(self.ind_subset)
-    
-    def __getitem__(self, idx):
-       
-        pos_relative = self.indices.index(self.ind_subset[idx])
 
-        return self.features[pos_relative], self.labels[pos_relative]
+    def __getitem__(self, idx):
+        """Devuelve las imágenes y etiquetas del elemento idx dentro del subset actual."""
+        if self.random_subsets:
+            orig_idx = int(self.ind_subset[idx])
+            pos = self.idx2pos[orig_idx]
+            return self.images[pos], self.labels[pos]
+        else:
+            return self.images[idx], self.labels[idx]
 
 def collate_fn(batch):
     features, labels = zip(*batch)
     
-    # Rellenar las secuencias de features (si es necesario)
     features_padded = torch.nn.utils.rnn.pad_sequence(features, batch_first=True, padding_value=0)
-    # Convertir labels a tensor
-    labels = torch.stack(labels, dim=0)
+    
+    labels = torch.stack(labels, dim=0)# Convertir labels a tensor
     return features_padded, labels
-
-def extractor(dataloader):
-    for features, labels in dataloader:
-        return features, labels 

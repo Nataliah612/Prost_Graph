@@ -13,8 +13,9 @@ from tqdm import tqdm
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 
 # =============== IMPORT FUNCIONES ======================
-from models.model_1graph import model_graph, device, weights_init
-from utils.data_load import create_file_label_df, CustomDataset,RandomDataset, collate_fn
+from models.model_1graph import get_keep_ia3_model, get_keep_lora_model,model_graph, device, weights_init
+from models.restrictions import loss_restrictions
+from utils.data_load import create_file_label_df, RAM_WSI_Dataset, collate_fn
 from utils.utils import compute_metrics
 
 
@@ -22,9 +23,9 @@ os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "max_split_size_mb:128"
 gc.collect()
 
 # =================== CONFIGURACIÓN ===================
-BASE_PATH = "/workspace/results/1graph"
+BASE_PATH = "/workspace/Prost_Graph/results"
 MODEL_TYPE = 3
-LEARNING_RATES = [1e-3]#, 1e-5, 1e-6,1e-4]
+LEARNING_RATES = [1e-2]#, 1e-5, 1e-6,1e-4]
 EPOCHS_RANGE = [100]
 BATCH_SIZES = [128]#, 128, 64,32]
 PATIENCE = 20
@@ -39,8 +40,8 @@ print(f"✅ Usando dispositivo: {device}")
 
 # =================== FUNCIONES AUXILIARES ===================
 def load_model(type_id, name):
-    model_map = {3: (model_graph, name)}
-    model_fn, path = model_map.get(type_id, (model_graph, 'other'))
+    model_map = {3: (get_keep_ia3_model, name)}
+    model_fn, path = model_map.get(type_id, (get_keep_ia3_model, 'other'))
     model = model_fn()
     model = torch.nn.SyncBatchNorm.convert_sync_batchnorm(model)
     model = model.to(device)
@@ -52,9 +53,9 @@ def load_model(type_id, name):
         'results_sicap': os.path.join(BASE_PATH, path),
         'results_path': os.path.join(BASE_PATH, path, 'result_mdl.xlsx'),
         'model_path': os.path.join(BASE_PATH, path, 'best_model.pth'),
-        'embedding_path':  '/workspace/data/pandas/embeddings/KEEP',
+        'embedding_path':  '/workspace/data/pandas/patches',
         'data_path':  '/workspace/data/datos_PANDAS.xlsx',
-        'sicap_path_embeddings': '/workspace/data/features_SICAP/embeddings/KEEP',
+        'sicap_path_embeddings': '/workspace/data/features_SICAP/patches',
         'excel_path_sicap': '/workspace/data/wsi_labels_changed.xlsx',
     }
 
@@ -81,38 +82,29 @@ def train_and_evaluate(model, model_id, model_path, params, paths):
     )
 
     print("Loading embeddings for Training ...")
-    data_train = RandomDataset(df_train, train_idx, len_subset=5000)
+    data_train = RAM_WSI_Dataset(df_train, train_idx, random_subsets=True, len_subset=int(0.3 * len(train_idx)))
 
-    train_loader = DataLoader(CustomDataset(df_train, train_idx), #data_train,
-                              batch_size=params["batch"],
-                              shuffle=True,  collate_fn=collate_fn)
+    train_loader = DataLoader(data_train, batch_size=params["batch"], shuffle=True,  collate_fn=collate_fn)
     print("Loading embeddings for Validation ...")
-    val_loader   = DataLoader(CustomDataset(df_train, val_idx),
-                              batch_size=params["batch"],
-                              shuffle=False, collate_fn=collate_fn)
+    val_loader   = DataLoader(RAM_WSI_Dataset(df_train, val_idx), batch_size=params["batch"], shuffle=False, collate_fn=collate_fn)
     print("Loading embeddings for Test ...")
-    test_loader = DataLoader(CustomDataset(df_train, test_idx),
-                            batch_size=params["batch"],
-                            shuffle=False, collate_fn=collate_fn)
+    test_loader = DataLoader(RAM_WSI_Dataset(df_train, test_idx), batch_size=params["batch"],shuffle=False, collate_fn=collate_fn)
 
     # ------------ perdidas y optimizadores ------------------------
-    #w_class1  = compute_class_weights(df_train["gleason_primary"])
-    #w_class2  = compute_class_weights(df_train["gleason_secondary"])
-
-    #loss_fn1  = nn.CrossEntropyLoss(weight= w_class1) #FocalLoss(weight=w_class1, gamma=2.0)
-    #loss_fn2  = nn.CrossEntropyLoss(weight= w_class2) #FocalLoss(weight=w_class2, gamma=2.0)
+  
     loss_sigm = nn.BCEWithLogitsLoss()
 
+    print(sum(p.numel() for p in model.parameters() if p.requires_grad))
     model.apply(weights_init)
    
-    optimizer = optim.AdamW(model.parameters(), lr=params["lr"], weight_decay=1e-5) # Optimizador 
+    optimizer = optim.SGD(model.parameters(), lr=params["lr"], weight_decay=1e-5)
 
     scheduler = ReduceLROnPlateau(
         optimizer,
         mode="min",  # porque usamos val_loss (minimizar)
         factor=0.1,  # reduce LR a un 10% cuando no mejora
         patience=PATIENCE,  # cuántas épocas esperar sin mejora
-        verbose=True  # imprime cambios de LR
+        #verbose=True  # imprime cambios de LR
     )
 
     best_loss, no_improve = float("inf"), 0
@@ -128,14 +120,13 @@ def train_and_evaluate(model, model_id, model_path, params, paths):
 
         for inputs, y in tqdm(train_loader, desc="Training"):
             
-            #y = torch.tensor([[label_mapping[int(v.item())] for v in row] for row in y], device=device)
             y = y.to(device)
 
             y_onehot = torch.zeros(y.shape[0], 4).to(device)
             y_onehot.scatter_(1, y, 1)  
 
             out1 = model(inputs.to(device))
-            loss = loss_sigm(out1,y_onehot.to(device))
+            loss = loss_sigm(out1,y_onehot.to(device)) #+ loss_restrictions(out1, device=device)
 
             optimizer.zero_grad()
             loss.backward()
@@ -170,7 +161,7 @@ def train_and_evaluate(model, model_id, model_path, params, paths):
                 y_onehot.scatter_(1, y, 1)  
 
                 out1 = model(inputs.to(device))
-                loss = loss_sigm(out1,y_onehot.to(device))
+                loss = loss_sigm(out1,y_onehot.to(device))#+ loss_restrictions(out1, device=device)
 
                 batch_sz = inputs.size(0)
                 val_loss_sum += loss.item() * batch_sz
@@ -227,7 +218,7 @@ def train_and_evaluate(model, model_id, model_path, params, paths):
             y_onehot.scatter_(1, y.to(device), 1)  
 
             out1 = model(inputs.to(device))
-            loss = loss_sigm(out1,y_onehot.to(device))
+            loss = loss_sigm(out1,y_onehot.to(device))#+ loss_restrictions(out1, device=device)
 
             batch_sz = inputs.size(0)
             test_loss_sum += loss.item() * batch_sz
