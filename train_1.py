@@ -41,8 +41,7 @@ for lr, batch, epochs in itertools.product(LEARNING_RATES, BATCH_SIZES, EPOCHS_R
     params = {
         "batch": batch,
         "lr": lr,
-        "epochs": epochs
-    }
+        "epochs": epochs}
 
     # Multi-GPU accelerator init
     accelerator = Accelerator()
@@ -75,7 +74,7 @@ for lr, batch, epochs in itertools.product(LEARNING_RATES, BATCH_SIZES, EPOCHS_R
     df_train['gleason_secondary_mapped'] = df_train['gleason_secondary'].map(label_mapping)
     df_train['gleason_score'] = df_train['gleason_score'].astype(int)
 
-    # spliting data
+    # Spliting data
     train_val_idx, test_idx = train_test_split(df_train.index, test_size=0.15, stratify=df_train["gleason_score"])
 
     train_idx, val_idx = train_test_split(train_val_idx, test_size=0.10, stratify=df_train.loc[train_val_idx]["gleason_score"])
