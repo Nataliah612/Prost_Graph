@@ -8,8 +8,11 @@ from torch.utils.data import Dataset
 from torchvision import transforms as T
 import h5py
 
+from PIL import Image
+
 import gc
 from tqdm import tqdm
+import sys
 
 def create_file_label_df(embedding_path, data_path,slide_col = 'image_id', NAME=''):
     patch_list = []
@@ -48,101 +51,93 @@ def create_file_label_df(embedding_path, data_path,slide_col = 'image_id', NAME=
 
     return df_train
     
-class CustomDataset(Dataset):
-    def __init__(self, dataframe, indices):
-        """
-        Args:
-            dataframe (pd.DataFrame): El dataframe que contiene las características y las etiquetas.
-            indices (list): Lista de índices que especifican qué filas del dataframe utilizar.
-        """
+class RAM_WSI_Dataset(Dataset):
+    """
+    Dataset de WSI (Whole Slide Images) con imágenes precargadas en RAM.
+
+    Args:
+        dataframe (pd.DataFrame): DataFrame con columnas
+            'gleason_primary_mapped', 'gleason_secondary_mapped' y 'features' (ruta al .h5).
+        indices (list[int]): Lista de índices del DataFrame que se cargarán en memoria.
+        random_subsets (bool): Si True, en cada época se usa un subset aleatorio de tamaño len_subset.
+                               Si False, se usa todo el dataset (validación/test).
+        len_subset (int): Tamaño del subset aleatorio que se usará en cada época.
+                          Si es mayor que el total, se ajusta automáticamente.
+    """
+    def __init__(self, dataframe, indices, random_subsets=False, len_subset=1000):
         gc.collect()
         self.dataframe = dataframe
-        self.indices = indices  # Almacena los índices proporcionados
-        self.labels = []
-        self.patch = []
+        self.indices = list(indices)
+        self.random_subsets = bool(random_subsets)
 
-        for i in tqdm(indices, desc="Cargando patch"):
+        # Ajustar tamaño del subset
+        if self.random_subsets:
+            self.len_subset = min(int(len_subset), len(self.indices))
+        else:
+            self.len_subset = len(self.indices)
+
+        # Transformaciones básicas
+        self.transform = T.Compose([
+            T.ToTensor(),
+            T.Resize((224, 224)),
+            T.Normalize(mean=[0.5, 0.5, 0.5],
+                        std=[0.5, 0.5, 0.5])
+        ])
+
+        # Precargar imágenes y etiquetas en RAM
+        self.images, self.labels = [], []
+        for i in tqdm(self.indices, desc="Loading WSI", file=sys.stdout):
             row = self.dataframe.iloc[i]
-
-            patch = row['patch']
-            with h5py.File(patch, "r", swmr=True) as h5_file:
-                imgs = h5_file["imgs"][:]  # numpy array [num_imgs, H, W, C]
-
-            self.patch.append(torch.tensor(imgs))
-
-            labels= torch.tensor(
+            label = torch.tensor(
                 [row['gleason_primary_mapped'], row['gleason_secondary_mapped']],
                 dtype=torch.long
             )
-            self.labels.append(labels)
+            self.labels.append(label)
 
-    def __getitem__(self, idx):
-        
-        return self.patch[idx], self.labels[idx]
-
-    def __len__(self):
-        return len(self.indices)
-        
-class RandomDataset(Dataset):
-    def __init__(self, dataframe, indices,len_subset=1000,small_dataset_for_test = False):
-        """
-        Args:
-            dataframe: pd.DataFrame con una columna 'patch' que contiene rutas a .h5
-            indices: lista de índices (filas del dataframe) que forman el universo
-            len_subset: tamaño del subset aleatorio por época
-        """
-        gc.collect()
-        self.dataframe = dataframe
-        self.indices = list(indices) 
-        self.len_subset = int(len_subset)
-
-        self.patch = []
-        self.labels = []
-
-        for i in tqdm(indices, desc="Cargando patch"):
-            row = self.dataframe.iloc[i]
-            label1 = row['gleason_primary']
-            label2 = row['gleason_secondary']
-            self.labels.append(torch.tensor([label1, label2], dtype=torch.long))
-            patch = row['patch']
-            
-            with h5py.File(patch, "r", swmr=True) as h5_file:
+            features_path = row['patch']
+            with h5py.File(features_path, "r", swmr=True) as h5_file:
                 imgs = h5_file["imgs"][:]  # numpy array [num_imgs, H, W, C]
-            
-            # Aplicamos transform a cada imagen
-            self.patch.append(torch.tensor(imgs))
 
-        # Inicializa ind_subset (hay que llamar update_random_list() antes de usar)
-        self.ind_subset = None
-        self.update_random_list()
+            imgs_tensor = torch.stack([self.transform(Image.fromarray(img)) for img in imgs])
+            self.images.append(imgs_tensor)
 
-    def update_random_list(self):
-        """Genera nuevos índices aleatorios para el subset."""
+        # Mapeo índice original → posición en listas cargadas
+        self.idx2pos = {orig_idx: pos for pos, orig_idx in enumerate(self.indices)}
 
-        self.ind_subset = np.random.choice(self.indices, self.len_subset, replace=True) # Generar indices aleatorios 
+        # Inicializar subset
+        if self.random_subsets:
+            self.ind_subset = None
+            self.update_random_subset()
+        else:
+            self.ind_subset = self.indices
 
-    def get_current_indices(self):
-        """Devuelve la lista de índices usados en esta época, indices originales del dataframe"""
+    def update_random_subset(self):
+        """Genera un nuevo subset aleatorio (sin reemplazo)."""
+        if self.random_subsets:
+            self.ind_subset = np.random.choice(self.indices, self.len_subset, replace=False)  
 
-        return self.ind_subset.tolist()
-    
+    def get_current_subset_indices(self):
+        """Devuelve la lista actual de índices del DataFrame usados en esta época."""
+        return list(self.ind_subset)
+
     def __len__(self):
         return len(self.ind_subset)
-    
-    def __getitem__(self, idx):
-       
-        pos_relative = self.indices.index(self.ind_subset[idx])
 
-        return self.features[pos_relative], self.labels[pos_relative]
+    def __getitem__(self, idx):
+        """Devuelve las imágenes y etiquetas del elemento idx dentro del subset actual."""
+        if self.random_subsets:
+            orig_idx = int(self.ind_subset[idx])
+            pos = self.idx2pos[orig_idx]
+            return self.images[pos], self.labels[pos]
+        else:
+            return self.images[idx], self.labels[idx]
 
 def collate_fn(batch):
     features, labels = zip(*batch)
-    
-    # Rellenar las secuencias de features (si es necesario)
-    features_padded = torch.nn.utils.rnn.pad_sequence(features, batch_first=True, padding_value=0)
-    # Convertir labels a tensor
-    labels = torch.stack(labels, dim=0)
-    return features_padded, labels
+
+    list_features = list(features) # features: tuple de tensores de distinta longitud -> devolvemos como lista
+    labels = torch.stack(labels, dim=0) # Convertir labels a tensor
+    return list_features, labels
 
 def extractor(dataloader):
     for features, labels in dataloader:
