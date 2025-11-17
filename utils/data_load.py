@@ -1,4 +1,3 @@
-
 import numpy as np 
 import os
 import pandas as pd
@@ -6,16 +5,16 @@ import pandas as pd
 import torch
 from torch.utils.data import Dataset
 from torchvision import transforms as T
-from PIL import Image
 import h5py
+
+from PIL import Image
 
 import gc
 from tqdm import tqdm
 import sys
 
-def create_file_label_df(patch_path, data_path,slide_col = 'image_id', NAME=''):
-    features_list = []
-    patient_list = []
+def create_file_label_df(embedding_path, data_path,slide_col = 'image_id', NAME=''):
+    patch_list = []
     gleason_score = []
     gleason_primary_list = []
     gleason_secondary_list = []
@@ -23,29 +22,27 @@ def create_file_label_df(patch_path, data_path,slide_col = 'image_id', NAME=''):
     df = pd.read_excel(data_path)
     df = df.head(100)
 
-    patches = [f for f in os.listdir(patch_path) if f.endswith('.h5')]
+    embeddings = [f for f in os.listdir(embedding_path) if f.endswith('.h5')]
 
     # Agrega tqdm aquí
-    for f in tqdm(patches, desc="Reading DataFrame"):
+    for f in tqdm(embeddings, desc="Reading DataFrame"):
         slide_id = f.split('.h5')[0]
         if NAME == 'SICAP':
             slide_id = slide_id.split('_')[0]
         row = df[df[slide_col] == slide_id]
 
         if not row.empty:
-            ruta_h5 = os.path.join(patch_path, f)
-            features_list.append(ruta_h5)
+            ruta_h5 = os.path.join(embedding_path, f)
+
             gleason = row[['gleason_score']].values
-            patient = row['patient_id'].values if 'patient_id' in row else row[slide_col].values
-            
+
             gleason_score.append(gleason.item())
-            patient_list.append(patient)
+            patch_list.append(ruta_h5)
             gleason_primary_list.append(row['gleason_primary'].values[0])
             gleason_secondary_list.append(row['gleason_secondary'].values[0])
 
     df_train = pd.DataFrame({
-        'features': features_list,
-        'patients': patient_list,
+        'patch': patch_list,
         'gleason_score': gleason_score,
         'gleason_primary': gleason_primary_list,
         'gleason_secondary': gleason_secondary_list
@@ -96,13 +93,11 @@ class RAM_WSI_Dataset(Dataset):
             )
             self.labels.append(label)
 
-            features_path = row['features']
+            features_path = row['patch']
             with h5py.File(features_path, "r", swmr=True) as h5_file:
                 imgs = h5_file["imgs"][:]  # numpy array [num_imgs, H, W, C]
 
-            imgs_tensor = torch.stack([
-                self.transform(Image.fromarray(img)) for img in imgs
-            ])
+            imgs_tensor = torch.stack([self.transform(Image.fromarray(img)) for img in imgs])
             self.images.append(imgs_tensor)
 
         # Mapeo índice original → posición en listas cargadas
@@ -138,8 +133,11 @@ class RAM_WSI_Dataset(Dataset):
 
 def collate_fn(batch):
     features, labels = zip(*batch)
-    
-    features_padded = torch.nn.utils.rnn.pad_sequence(features, batch_first=True, padding_value=0)
-    
-    labels = torch.stack(labels, dim=0)# Convertir labels a tensor
-    return features_padded, labels
+
+    list_features = list(features) # features: tuple de tensores de distinta longitud -> devolvemos como lista
+    labels = torch.stack(labels, dim=0) # Convertir labels a tensor
+    return list_features, labels
+
+def extractor(dataloader):
+    for features, labels in dataloader:
+        return features, labels 
