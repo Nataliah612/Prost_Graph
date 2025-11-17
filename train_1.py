@@ -13,7 +13,7 @@ from tqdm import tqdm
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 
 # =============== IMPORT FUNCIONES ======================
-from models.model_1graph import model_graph, device, weights_init
+from models.model_1graph import model_graph, device, weights_init,get_keep_ia3_model
 from utils.data_load import create_file_label_df, CustomDataset,RandomDataset, collate_fn
 from utils.utils import compute_metrics
 
@@ -22,7 +22,7 @@ os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "max_split_size_mb:128"
 gc.collect()
 
 # =================== CONFIGURACIÓN ===================
-BASE_PATH = "/workspace/results/1graph"
+BASE_PATH = "/workspace/results"
 MODEL_TYPE = 3
 LEARNING_RATES = [1e-3]#, 1e-5, 1e-6,1e-4]
 EPOCHS_RANGE = [100]
@@ -39,22 +39,22 @@ print(f"✅ Usando dispositivo: {device}")
 
 # =================== FUNCIONES AUXILIARES ===================
 def load_model(type_id, name):
-    model_map = {3: (model_graph, name)}
-    model_fn, path = model_map.get(type_id, (model_graph, 'other'))
-    model = model_fn()
+    model_map = {3: (get_keep_ia3_model, name)}
+    model_fn, path = model_map.get(type_id, (get_keep_ia3_model, 'other'))
+    model = model_fn().to(device)
     model = torch.nn.SyncBatchNorm.convert_sync_batchnorm(model)
-    model = model.to(device)
+    #model = model
 
-    os.makedirs(os.path.join(BASE_PATH, path), exist_ok= True)
+    #os.makedirs(os.path.join(BASE_PATH, path), exist_ok= True)
     paths = {
         'output_file': os.path.join(BASE_PATH, path, 'output.txt'),
         'plot_kfold_path': os.path.join(BASE_PATH, path, 'k_fold_plot.png'),
         'results_sicap': os.path.join(BASE_PATH, path),
         'results_path': os.path.join(BASE_PATH, path, 'result_mdl.xlsx'),
         'model_path': os.path.join(BASE_PATH, path, 'best_model.pth'),
-        'embedding_path':  '/workspace/data/pandas/embeddings/KEEP',
+        'embedding_path':  '/workspace/data/pandas/patches',
         'data_path':  '/workspace/data/datos_PANDAS.xlsx',
-        'sicap_path_embeddings': '/workspace/data/features_SICAP/embeddings/KEEP',
+        'sicap_path_embeddings': '/workspace/data/features_SICAP/patches',
         'excel_path_sicap': '/workspace/data/wsi_labels_changed.xlsx',
     }
 
@@ -96,11 +96,6 @@ def train_and_evaluate(model, model_id, model_path, params, paths):
                             shuffle=False, collate_fn=collate_fn)
 
     # ------------ perdidas y optimizadores ------------------------
-    #w_class1  = compute_class_weights(df_train["gleason_primary"])
-    #w_class2  = compute_class_weights(df_train["gleason_secondary"])
-
-    #loss_fn1  = nn.CrossEntropyLoss(weight= w_class1) #FocalLoss(weight=w_class1, gamma=2.0)
-    #loss_fn2  = nn.CrossEntropyLoss(weight= w_class2) #FocalLoss(weight=w_class2, gamma=2.0)
     loss_sigm = nn.BCEWithLogitsLoss()
 
     model.apply(weights_init)
@@ -127,8 +122,6 @@ def train_and_evaluate(model, model_id, model_path, params, paths):
         train_seen     = torch.zeros(1, dtype=torch.long, device=device)
 
         for inputs, y in tqdm(train_loader, desc="Training"):
-            
-            #y = torch.tensor([[label_mapping[int(v.item())] for v in row] for row in y], device=device)
             y = y.to(device)
 
             y_onehot = torch.zeros(y.shape[0], 4).to(device)
@@ -262,8 +255,8 @@ if __name__ == "__main__":
         name = f"try_{lr}_{batch}_{epochs}"
         model, paths = load_model(MODEL_TYPE, name)
 
-        with open(paths['output_file'], "w") as f:
-                    f.write(f"Modelo: {name} \n")
+        '''with open(paths['output_file'], "w") as f:
+                    f.write(f"Modelo: {name} \n")'''
         params = {
             "batch": batch,
             "lr": lr,

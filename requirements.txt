@@ -1,6 +1,15 @@
+torch==2.2.2
 torch_geometric
 
 safetensors
 
 seaborn
 openpyxl
+
+transformers
+peft
+
+h5py
+soxr
+
+timm==1.0.7

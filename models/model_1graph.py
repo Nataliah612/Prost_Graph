@@ -9,6 +9,11 @@ from torch import Tensor
 
 from torch_geometric.nn.aggr import Aggregation
 
+from transformers import AutoModel
+from torchvision import transforms
+
+from peft import LoraConfig, get_peft_model,IA3Config
+
 import os
 os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "max_split_size_mb:128"
 
@@ -16,6 +21,10 @@ device = torch.device("cpu") if not torch.cuda.is_available() else torch.device(
 
 print(torch.cuda.is_available())   # True si hay GPU disponible
 print(torch.cuda.device_count())   # Número de GPUs
+
+def weights_init(m):
+    if isinstance(m, nn.Linear):
+        torch.nn.init.xavier_uniform_(m.weight.data)
 
 def build_attention_graph(node_features, adj_model, k=8, exclude_self=True):
     """
@@ -134,8 +143,8 @@ class gat(torch.nn.Module):
     def __init__(self, heads=8):
         super(gat,self).__init__()
 
-        self.gat1 = GATConv(768, 256, heads=heads, edge_dim = 1, concat=False)
-        self.gat2 = GATConv(256, 64, heads=heads, edge_dim = 1,concat=False)
+        self.gat1 = GATConv(768, 64, heads=heads, edge_dim = 1, concat=False)
+        #self.gat2 = GATConv(256, 64, heads=heads, edge_dim = 1,concat=False)
         #att_net = nn.Sequential(nn.Linear(256, 128), nn.ReLU(), nn.Linear(128, 64), nn.ReLU(), nn.Linear(64, 1),nn.Tanh())
         #att_net = Attention()
         self.Aggr = Aggregate_Attnt(L = 768,I = 1)
@@ -147,14 +156,14 @@ class gat(torch.nn.Module):
 
         x1, _ = self.gat1(x, edge_index, edge_weight, return_attention_weights=False)
         x1 = F.relu(x1)
-        x2, _ = self.gat2(x1, edge_index, edge_weight, return_attention_weights=False)
+        #x2, _ = self.gat2(x1, edge_index, edge_weight, return_attention_weights=False)
         
-        x2 = x2.float()
+        x1 = x1.float()
 
         w=self.Aggr(x, batch)
 
-        x = torch.sum(w*x2,dim=0)
-        #x = self.fc(x)
+        x = torch.max(w*x1,dim=0)
+        x = self.fc(x)
 
         return x, w
 
@@ -228,10 +237,108 @@ class model_graph(nn.Module):
 
         all_outputs1 = torch.stack(all_outputs1)
 
-        x1 = self.mlp_out1(all_outputs1)
+        #x1 = self.mlp_out1(all_outputs1)
      
-        return x1
+        return all_outputs1
 
-def weights_init(m):
-    if isinstance(m, nn.Linear):
-        torch.nn.init.xavier_uniform_(m.weight.data)
+class KEEPForGleason(nn.Module):
+    def __init__(self, base_model, classifier_model):
+        super().__init__()
+        self.base = base_model
+
+        # Extraemos la dimensión de salida del encoder automáticamente
+        rep_dim = getattr(base_model, "embed_dim", 768)
+
+        # Cabezal más expresivo con normalización, activación y dropout
+        self.classifier = classifier_model()
+
+        # Inicialización de pesos (mejor estabilidad)
+        for m in self.classifier.modules():
+            if isinstance(m, nn.Linear):
+                nn.init.xavier_uniform_(m.weight)
+                if m.bias is not None:
+                    nn.init.zeros_(m.bias)
+
+    def forward(self, images):
+        # Codificación del encoder visual
+        
+        for i in range(images.shape[0]):
+            rep = self.base.encode_image(images[i])
+            logits = self.classifier(rep)
+        return logits
+
+# ------------------------------
+# Inicializar KEEP + LoRA
+# ------------------------------
+def get_keep_ia3_model():
+    model_name = "Astaxanthin/KEEP"
+    model = AutoModel.from_pretrained(model_name, trust_remote_code=True)
+    model.eval()
+
+    # -----------------------------
+    # 1. Seleccionamos los módulos objetivo igual que en tu código
+    # -----------------------------
+    target_modules = []
+    for name, module in model.named_modules():
+        if isinstance(module, nn.Linear) and any(
+            key in name for key in ["attn.qkv", "attn.proj", "mlp.fc1", "mlp.fc2"]
+        ):
+            target_modules.append(name)
+
+    # -----------------------------
+    # 2. Configuración IA³
+    # -----------------------------
+    ia3_config = IA3Config(
+        target_modules=target_modules,
+        feedforward_modules=target_modules, 
+        # Opcional: puedes agregar más si tu modelo tiene otros nombres
+        task_type="FEATURE_EXTRACTION"
+    )
+
+    # -----------------------------
+    # 3. Aplicamos IA³ al modelo base
+    # -----------------------------
+    ia3_model = get_peft_model(model, ia3_config)
+
+    # Wrapper final (igual que en tu código)
+    net = KEEPForGleason(ia3_model, model_graph)
+
+    # -----------------------------
+    # 4. Congelar todo excepto IA³
+    # -----------------------------
+    for name, param in net.named_parameters():
+        if "ia3_" not in name:       # IA³ usa este prefijo
+            param.requires_grad = False
+
+    return net
+# ------------------------------
+# Inicializar KEEP + LoRA
+# ------------------------------
+def get_keep_lora_model():
+    model_name = "Astaxanthin/KEEP"
+    model = AutoModel.from_pretrained(model_name, trust_remote_code=True)
+    model.eval()
+
+    target_modules = []
+    for name, module in model.named_modules():
+        if isinstance(module, nn.Linear) and any(key in name for key in ["attn.qkv", "attn.proj", "mlp.fc1", "mlp.fc2"]):
+            target_modules.append(name)
+
+    lora_config = LoraConfig(
+        r=8,  # más capacidad representativa
+        lora_alpha=16,  # proporcional al rango
+        target_modules=target_modules,
+        lora_dropout=0.1,  # regulariza para dataset pequeño/desbalanceado
+        bias="none",
+        task_type="FEATURE_EXTRACTION"
+    )
+
+    lora_model = get_peft_model(model, lora_config)
+    net = KEEPForGleason(lora_model, model_graph)
+
+    # Congelar todos los parámetros que no son LoRA
+    for name, param in net.named_parameters():
+        if "lora_" not in name:
+            param.requires_grad = False
+
+    return net

@@ -6,40 +6,41 @@ import pandas as pd
 import torch
 from torch.utils.data import Dataset
 from torchvision import transforms as T
+import h5py
 
 import gc
 from tqdm import tqdm
 
 def create_file_label_df(embedding_path, data_path,slide_col = 'image_id', NAME=''):
-    features_list = []
+    patch_list = []
     gleason_score = []
     gleason_primary_list = []
     gleason_secondary_list = []
 
     df = pd.read_excel(data_path)
-    #df = df.head(1000)
+    df = df.head(100)
 
-    embeddings = [f for f in os.listdir(embedding_path) if f.endswith('.npy')]
+    embeddings = [f for f in os.listdir(embedding_path) if f.endswith('.h5')]
 
     # Agrega tqdm aquí
     for f in tqdm(embeddings, desc="Reading DataFrame"):
-        slide_id = f.split('.npy')[0]
+        slide_id = f.split('.h5')[0]
         if NAME == 'SICAP':
             slide_id = slide_id.split('_')[0]
         row = df[df[slide_col] == slide_id]
 
         if not row.empty:
-            ruta_npy = os.path.join(embedding_path, f)
+            ruta_h5 = os.path.join(embedding_path, f)
 
             gleason = row[['gleason_score']].values
 
             gleason_score.append(gleason.item())
-            features_list.append(ruta_npy)
+            patch_list.append(ruta_h5)
             gleason_primary_list.append(row['gleason_primary'].values[0])
             gleason_secondary_list.append(row['gleason_secondary'].values[0])
 
     df_train = pd.DataFrame({
-        'features': features_list,
+        'patch': patch_list,
         'gleason_score': gleason_score,
         'gleason_primary': gleason_primary_list,
         'gleason_secondary': gleason_secondary_list
@@ -58,14 +59,16 @@ class CustomDataset(Dataset):
         self.dataframe = dataframe
         self.indices = indices  # Almacena los índices proporcionados
         self.labels = []
-        self.features = []
+        self.patch = []
 
-        for i in tqdm(indices, desc="Cargando features"):
+        for i in tqdm(indices, desc="Cargando patch"):
             row = self.dataframe.iloc[i]
 
-            features = row['features']
-            features = np.load(features, mmap_mode='r')
-            self.features.append(torch.tensor(features))
+            patch = row['patch']
+            with h5py.File(patch, "r", swmr=True) as h5_file:
+                imgs = h5_file["imgs"][:]  # numpy array [num_imgs, H, W, C]
+
+            self.patch.append(torch.tensor(imgs))
 
             labels= torch.tensor(
                 [row['gleason_primary_mapped'], row['gleason_secondary_mapped']],
@@ -75,7 +78,7 @@ class CustomDataset(Dataset):
 
     def __getitem__(self, idx):
         
-        return self.features[idx], self.labels[idx]
+        return self.patch[idx], self.labels[idx]
 
     def __len__(self):
         return len(self.indices)
@@ -84,7 +87,7 @@ class RandomDataset(Dataset):
     def __init__(self, dataframe, indices,len_subset=1000,small_dataset_for_test = False):
         """
         Args:
-            dataframe: pd.DataFrame con una columna 'features' que contiene rutas a .h5
+            dataframe: pd.DataFrame con una columna 'patch' que contiene rutas a .h5
             indices: lista de índices (filas del dataframe) que forman el universo
             len_subset: tamaño del subset aleatorio por época
         """
@@ -93,19 +96,21 @@ class RandomDataset(Dataset):
         self.indices = list(indices) 
         self.len_subset = int(len_subset)
 
-        self.features = []
+        self.patch = []
         self.labels = []
 
-        for i in tqdm(indices, desc="Cargando features"):
+        for i in tqdm(indices, desc="Cargando patch"):
             row = self.dataframe.iloc[i]
             label1 = row['gleason_primary']
             label2 = row['gleason_secondary']
             self.labels.append(torch.tensor([label1, label2], dtype=torch.long))
+            patch = row['patch']
             
-            features = np.load(row['features'], mmap_mode='r')
+            with h5py.File(patch, "r", swmr=True) as h5_file:
+                imgs = h5_file["imgs"][:]  # numpy array [num_imgs, H, W, C]
             
             # Aplicamos transform a cada imagen
-            self.features.append(torch.tensor(features))
+            self.patch.append(torch.tensor(imgs))
 
         # Inicializa ind_subset (hay que llamar update_random_list() antes de usar)
         self.ind_subset = None
