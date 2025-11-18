@@ -5,7 +5,9 @@ from tqdm import tqdm
 import sys 
 import math
 
-from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, cohen_kappa_score
+from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, cohen_kappa_score, average_precision_score, roc_auc_score
+
+from torch.cuda.amp import autocast
 
 from models.model_1graph import device
 
@@ -67,7 +69,13 @@ def run_epoch(model, dataloader, device, accelerator,
 
         # --- Forward ---
         # (El modelo mueve internamente los inputs al device)
-        wsi_prediction, patchs_prediction = model(inputs) # wsi_prediction: Tensor (B,4) , patchs_prediction: list of B tensors, cada uno (N_patches,4)
+        
+
+        # dentro del training loop
+        with autocast(dtype=torch.float16):
+            wsi_prediction, patchs_prediction = model(inputs)
+
+        #wsi_prediction, patchs_prediction = model(inputs) # wsi_prediction: Tensor (B,4) , patchs_prediction: list of B tensors, cada uno (N_patches,4)
 
         # --- Cálculo de proporciones por WSI (media de probabilidades por parche) ---
         # Si algún WSI tuviera 0 parches, usamos vector ceros (Aunque eso debería evitarse)
@@ -83,8 +91,8 @@ def run_epoch(model, dataloader, device, accelerator,
     
         # --- Cálculo de pérdidas ---
         loss = loss_BCE(wsi_prediction, y_onehot)
-        loss_pe_pc = loss_restrictions(wsi_proportions, args.alpha_pe, args.alpha_pc)
-        total_loss = loss + loss_pe_pc
+        #loss_pe_pc = loss_restrictions(wsi_proportions, alpha_pe= 0.1, alpha_pc=1)
+        total_loss = loss #+ loss_pe_pc
 
         # --- Backpropagation ---
         if mode == "train":
@@ -123,7 +131,7 @@ def run_epoch(model, dataloader, device, accelerator,
     y_onehot = torch.cat(all_y_true_onehot).numpy()
 
     # --- Calcular métricas ---
-    metrics = compute_metrics(
+    metrics = compute_all_gleason_metrics(
         y_true_primary=y_true1,
         y_pred_primary=y_pred1,
         y_true_secondary=y_true2,
@@ -267,3 +275,97 @@ def compute_metrics(y_true, y_pred):
         f1_score(y_true, y_pred, average='weighted', zero_division=0),
         cohen_kappa_score(y_true, y_pred, weights='quadratic')
     )
+
+def compute_all_gleason_metrics(y_true_primary, y_pred_primary,
+                                y_true_secondary, y_pred_secondary, y_true_onehot=None,y_probs=None):
+    """
+    Calcula las métricas para Gleason primario, secundario y global.
+    
+    Args:
+        y_true_primary (array/tensor): etiquetas verdaderas del Gleason primario
+        y_pred_primary (array/tensor): predicciones del Gleason primario
+        y_true_secondary (array/tensor): etiquetas verdaderas del Gleason secundario
+        y_pred_secondary (array/tensor): predicciones del Gleason secundario
+        y_true_onehot: array (n_samples, n_labels) con 0/1
+        y_prob: array (n_samples, n_labels) con probabilidades en [0,1]
+
+    Returns:
+        dict: métricas globales, incluyendo primary, secondary, global y multilabel.
+    """
+    # --- Primary ---
+    metrics_primary = compute_metrics(y_true_primary, y_pred_primary)
+
+    # --- Secondary ---
+    metrics_secondary = compute_metrics(y_true_secondary, y_pred_secondary)
+
+    # --- Global ---
+    y_true_global = y_true_primary + y_true_secondary
+    y_pred_global = y_pred_primary + y_pred_secondary
+    metrics_global = compute_metrics(y_true_global, y_pred_global)
+
+    # --- Empaquetar resultados en un solo diccionario ---
+    metrics = {
+        "primary": metrics_primary,
+        "secondary": metrics_secondary,
+        "global": metrics_global,
+    }
+
+     # --- Multilabel ---
+    if y_true_onehot is not None and y_probs is not None:
+        metrics["multilabel"] = compute_multilabel_metrics(y_true_onehot, y_probs)
+
+    return metrics
+def compute_multilabel_metrics(y_true_onehot, y_prob):
+    """
+    Métricas para clasificación multietiqueta.
+
+    y_true_onehot: array (n_samples, n_labels) con 0/1
+    y_prob: array (n_samples, n_labels) con probabilidades en [0,1]
+    """
+
+    if isinstance(y_true_onehot, torch.Tensor):
+        y_true_onehot = y_true_onehot.cpu().numpy()
+    if isinstance(y_prob, torch.Tensor):
+        y_prob = y_prob.cpu().numpy()
+
+    # Predicciones binarias aplicando umbral 0.5
+    y_pred = (y_prob >= 0.5).astype(int)
+
+    metrics = {}
+
+    # Subset accuracy (Exact match)
+    metrics["subset_accuracy"] = accuracy_score(y_true_onehot, y_pred)
+
+    # Precision / Recall / F1 (micro = recomendado en multilabel)
+    metrics["precision_micro"] = precision_score(
+        y_true_onehot, y_pred, average="micro", zero_division=0
+    )
+    metrics["recall_micro"] = recall_score(
+        y_true_onehot, y_pred, average="micro", zero_division=0
+    )
+    metrics["f1_micro"] = f1_score(
+        y_true_onehot, y_pred, average="micro", zero_division=0
+    )
+
+    # También macro si te interesa
+    metrics["precision_macro"] = precision_score(
+        y_true_onehot, y_pred, average="macro", zero_division=0
+    )
+    metrics["recall_macro"] = recall_score(
+        y_true_onehot, y_pred, average="macro", zero_division=0
+    )
+    metrics["f1_macro"] = f1_score(
+        y_true_onehot, y_pred, average="macro", zero_division=0
+    )
+
+    # AUROC (promedio macro por etiqueta)
+    metrics["auroc_macro"] = roc_auc_score(
+        y_true_onehot, y_prob, average="macro"
+    )
+
+    # AUPRC (average precision) macro
+    metrics["auprc_macro"] = average_precision_score(
+        y_true_onehot, y_prob, average="macro"
+    )
+
+    return metrics

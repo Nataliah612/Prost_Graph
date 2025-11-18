@@ -25,10 +25,10 @@ gc.collect()
 # =================== HIPERPARÉMETROS ===================
 LEARNING_RATES = [1e-3]#, 1e-5, 1e-6,1e-4]
 EPOCHS_RANGE = [100]
-BATCH_SIZES = [16]#, 128, 64,32]
+BATCH_SIZES = [4]#, 128, 64,32]
 PATIENCE = 20
 RANDOM_SEED = 98
-num_workers = 4
+num_workers = 2
 
 # =================== CONFIGURACION MODELOS ===================
 BASE_PATH = "/workspace/results"
@@ -93,7 +93,7 @@ for lr, batch, epochs in itertools.product(LEARNING_RATES, BATCH_SIZES, EPOCHS_R
 
     # loss / optimizer / scheduler
     loss = nn.BCEWithLogitsLoss()
-    model.apply(weights_init)
+    #model.apply(weights_init)
     optimizer = optim.AdamW(model.parameters(), lr=params["lr"], weight_decay=1e-5)
     scheduler = ReduceLROnPlateau(optimizer, mode="min", factor=0.1, patience=PATIENCE, verbose=True)
 
@@ -115,7 +115,7 @@ for lr, batch, epochs in itertools.product(LEARNING_RATES, BATCH_SIZES, EPOCHS_R
 
         # VALIDATION
         model.eval()
-        val_metrics, val_loss = run_epoch(model, val_loader, device, accelerator, loss, optimizer)
+        val_metrics, val_loss = run_epoch(model, val_loader, device, accelerator, loss, optimizer, mode = 'val')
        
         scheduler.step(val_loss)
        
@@ -141,7 +141,7 @@ for lr, batch, epochs in itertools.product(LEARNING_RATES, BATCH_SIZES, EPOCHS_R
 
     # TEST
     model.eval()
-    test_metrics, test_loss = run_epoch(model, val_loader, device, accelerator, loss, optimizer)   
+    test_metrics, test_loss = run_epoch(model, val_loader, device, accelerator, loss, optimizer, mode='test')   
 
     print(f"Test Loss: {test_loss:.4f} Acc: {test_metrics[0]:.4f} Kappa: {test_metrics[-1]:.4f}")
     with open(paths['output_file'], "a") as f:

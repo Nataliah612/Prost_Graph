@@ -2,16 +2,16 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch_geometric import data
-from torch_geometric.nn import GATConv
-
+from torch_geometric.data import DataLoader
+from torch_geometric.nn import GATConv, GATv2Conv
+from torch_geometric.data import Batch
 from torch import Tensor
-from typing import Tuple, Optional
-
+from typing import Tuple
+from torch_geometric.data import Data
 import os
 from transformers import AutoModel 
 
-from peft import LoraConfig, get_peft_model,IA3Config
-from PIL import Image
+from peft import get_peft_model,IA3Config
 
 os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "max_split_size_mb:128"
 
@@ -103,8 +103,9 @@ def build_attention_graph_chunked(node_features: Tensor,
                 # evaluar cada parte
                 for (a, b) in parts:
                     tgt = node_features[a:b]
-                    src_rep = src.expand(tgt.size(0), -1)  # (M, D)
-                    sc = adj_model(src_rep, tgt)  # (M,)
+                    src_rep = adj_model(src, tgt)  # modificar adj para soportar broadcasting
+                    # (M, D)
+                    # (M,)
                     scores_chunks.append(sc)
                     idx_chunks.append(torch.arange(a, b, device=dev))
             else:
@@ -143,6 +144,8 @@ def build_attention_graph_chunked(node_features: Tensor,
     return edge_index.long(), edge_attr.float()
 
 
+
+
 class Aggregate_Attnt(nn.Module):
     def __init__(self, L=512, I=1):
         super().__init__()
@@ -162,16 +165,20 @@ class Aggregate_Attnt(nn.Module):
 
 
 class mlp(nn.Module):
-    def __init__(self, in_dim=64, out_dim=4):
+    def __init__(self, in_dim=128, out_dim=4):
         super(mlp, self).__init__()
         # BatchNorm1d requiere input (B, C) — si tienes (N_nodes, C) está bien.
         self.bn = nn.BatchNorm1d(in_dim)
         self.dropout = nn.Dropout(0.3)
-        self.fc = nn.Linear(in_dim, out_dim)
+        self.bn1 = nn.BatchNorm1d(64)
+        self.fc = nn.Linear(64, out_dim)
         weights_init(self)
 
     def forward(self, x):
         x = self.bn(x)
+        x = F.relu(x)
+        x = self.dropout(x)
+        x = self.bn1(x)
         x = F.relu(x)
         x = self.dropout(x)
         x = self.fc(x)
@@ -182,23 +189,56 @@ class gat(torch.nn.Module):
     def __init__(self, heads=8):
         super(gat, self).__init__()
         # GATConv( in_channels, out_channels_per_head, heads, edge_dim, concat=False )
-        self.gat1 = GATConv(768, 64, heads=heads, edge_dim=1, concat=False)
+        self.gat1 = GATv2Conv(768, 64, heads=heads, concat=False) #edge_dim=1
         self.Aggr = Aggregate_Attnt(L=768, I=1)
         self.fc = mlp(in_dim=64, out_dim=4)
 
-    def forward(self, data):
-        x, edge_index, edge_weight, batch = data.x, data.edge_index, data.edge_attr, None
-        edge_index = edge_index.to(x.device)
+    def forward(self, graph_list):
+        #x, edge_index, batch, ptr = batch.dataset, batch.edge_index, batch.batch, batch.ptr
+        #batch = Batch.from_data_list(graphs_list, )
+        #batch = batch.to(device)
+        #x, edge_index, batch = batch.dataset, batch.edge_index, batch.batch
+        #out = model(batch.x, batch.edge_index, batch.batch)
+        wsi_pred, patch_pred = [],[]
+         
+        for i in range(len(graph_list)):
+            graph = graph_list[i]
+            x, edge_index = graph.x, graph.edge_index
+            edge_index = edge_index.to(x.device)
+            if x.dim() == 3:
+                x = x.squeeze(dim=1)   # elimina batch extra
+            if x.dim() == 1:
+                x = x.unsqueeze(dim=0)
+            # GATConv puede requerir float32 si usas BatchNorm después; mantén dtype coherente.
+            z= self.gat1(x, edge_index)#, edge_weight, return_attention_weights=False)
+            z = F.relu(z)
 
-        # GATConv puede requerir float32 si usas BatchNorm después; mantén dtype coherente.
-        z,_ = self.gat1(x, edge_index, edge_weight, return_attention_weights=False)
-        z = F.relu(z)
+            w = self.Aggr(x)  # ojo: en tu versión original pasabas batch; aquí usamos x
+            z = self.fc(z)
+            z = torch.softmax(z, dim=0)
+            out, x_ind = torch.max(w * z, dim=0)
 
-        w = self.Aggr(x)  # ojo: en tu versión original pasabas batch; aquí usamos x
-        z = self.fc(z)
-        z = torch.softmax(z, dim=0)
-        x, x_ind = torch.max(w * z, dim=0)
-        return x, w
+            wsi_pred.append(out)
+            patch_pred.append(z)
+        wsi_output = torch.stack(wsi_pred, dim=0)
+        from torch.nn.utils.rnn import pad_sequence
+        patch_output = pad_sequence(patch_pred, batch_first=True)
+        #patch_output  = torch.stack(patch_pred_padding, dim=1)
+        
+        return wsi_output, patch_output
+
+def grafo_fully_connected(x ):
+    num_nodos = x.shape[0]
+    
+    # Creamos todas las combinaciones posibles
+    fila = torch.arange(num_nodos).repeat_interleave(num_nodos)
+    col = torch.arange(num_nodos).repeat(num_nodos)
+    
+    # Quitamos autoconexiones si quieres
+    mask = fila != col
+    edge_index = torch.stack([fila[mask], col[mask]], dim=0)
+
+    return Data(x=x, edge_index=edge_index)
 
 
 class model_graph(nn.Module):
@@ -217,33 +257,39 @@ class model_graph(nn.Module):
         asumo fea_o es (N, D) con nodos que pueden ser todo ceros (invalidos).
         """
         # Mascara de nodos válidos (suma != 0)
-        valid_nodes_mask = (fea_o.sum(-1) != 0)
+        '''valid_nodes_mask = (fea_o.sum(-1) != 0)
         valid_idx = torch.nonzero(valid_nodes_mask, as_tuple=False).view(-1)
 
         if valid_idx.numel() == 0:
             # nada válido
-            return torch.empty((0, 4), device=fea_o.device), torch.empty((0,), device=fea_o.device)
+            return torch.empty((0, 4), device=fea_o.device), torch.empty((0,), device=fea_o.device)'''
 
-        x = fea_o[valid_idx]  # (N_valid, D)
+        x = fea_o#[valid_idx]  # (N_valid, D)
 
         # Construir grafo con atención con chunking para ahorrar memoria
-        edge_index1, edge_attr1 = build_attention_graph_chunked(x, self.adj, k=8, chunk_size=512)
+        #edge_index1, edge_attr1 = build_attention_graph_chunked(x, self.adj, k=8, chunk_size=512)
 
-        data_list1 = data.Data(x=x, edge_index=edge_index1, edge_attr=edge_attr1)
+        #data_list1 = data.Data(x=x, edge_index=edge_index1, edge_attr=edge_attr1)
+        graphs_list = [grafo_fully_connected(xi.squeeze(dim=1)) for xi in x]
+        
 
-        out1, w1 = self.graphgat(data_list1)
-        w1 = w1.view(-1)
+        #graph_batch = Batch.from_data_list(graphs_list)
+        #graph_batch = DataLoader(graphs_list, batch_size=len(graphs_list), shuffle=True)
+        #pred_wsi, weights = [],[]
+        #for i in range(len(data_list1)):
+        # Asegurar 2D
+       
+        out, w1 = self.graphgat(graphs_list)
 
-        return out1, w1
+        #w1 = w1.view(-1)
+            
+        return out, w1
 
 
 class KEEPForGleason(nn.Module):
     def __init__(self, base_model, classifier_model):
         super().__init__()
         self.base = base_model
-
-        # Extraemos la dimensión de salida del encoder automáticamente
-        rep_dim = getattr(base_model, "embed_dim", 768)
 
         # Cabezal más expresivo con normalización, activación y dropout
         self.classifier = classifier_model()
@@ -257,56 +303,59 @@ class KEEPForGleason(nn.Module):
 
     def forward(self, images):
         # Codificación del encoder visual
-        
-        features_list = [[self.base.encode_image(patch.unsqueeze(dim=0), proj_contrast=False, normalize=False) for patch in img]for img in images]
-
+        features_list = [torch.stack([self.base.encode_image(patch.unsqueeze(dim=0).to(dtype=torch.float16)) for patch in img.squeeze(0)])for img in images]
+        #
         logits = self.classifier(features_list)
         return logits
 
-# ------------------------------
-# Inicializar KEEP + LoRA
-# ------------------------------
 def get_keep_ia3_model():
     model_name = "Astaxanthin/KEEP"
-    model = AutoModel.from_pretrained(model_name, trust_remote_code=True)
-    model.eval()
 
-    # -----------------------------
-    # 1. Seleccionamos los módulos objetivo igual que en tu código
-    # -----------------------------
+    # 1. Cargar modelo en 8 bits o 4 bits (MUCHO AHORRO DE MEMORIA)
+    model = AutoModel.from_pretrained(
+        model_name,
+        trust_remote_code=True,
+        load_in_8bit=True,        # <--- MUY IMPORTANTE
+        _from_auto = True
+    )
+
+    # 2. Activar gradient checkpointing para reducir VRAM
+    if hasattr(model, "gradient_checkpointing"):
+        model.gradient_checkpointing = True
+
+    # 3. Reducir uso de memoria durante forward
+    model.config.use_cache = False
+
+    # 4. Activar torch.compile si usas PyTorch 2.0+
+    model = torch.compile(model)
+
+    # 5. Identificar módulos lineales donde aplicar IA3
     target_modules = []
     for name, module in model.named_modules():
         if isinstance(module, nn.Linear) and any(
-            key in name for key in ["attn.qkv", "attn.proj"]#, "mlp.fc1", "mlp.fc2"]
+            key in name for key in ["mlp.fc1", "mlp.fc2"]
         ):
             target_modules.append(name)
 
-    # -----------------------------
-    # 2. Configuración IA³
-    # -----------------------------
     ia3_config = IA3Config(
         target_modules=target_modules,
-        feedforward_modules=target_modules, 
-        # Opcional: puedes agregar más si tu modelo tiene otros nombres
+        feedforward_modules=target_modules,
         task_type="FEATURE_EXTRACTION"
     )
 
-    # -----------------------------
-    # 3. Aplicamos IA³ al modelo base
-    # -----------------------------
     ia3_model = get_peft_model(model, ia3_config)
 
-    # Wrapper final (igual que en tu código)
+    # 6. Envolver con tu modelo final
     net = KEEPForGleason(ia3_model, model_graph)
 
-    # -----------------------------
-    # 4. Congelar todo excepto IA³
-    # -----------------------------
-    for name, param in net.named_parameters():
-        if "ia3_" not in name:       # IA³ usa este prefijo
+    # 7. Congelar TODO menos IA3
+    for name, param in ia3_model.named_parameters():
+        #if "fc1.ia3" not in name :
+        if "blocks.23.mlp.fc1.ia3" not in name:
             param.requires_grad = False
 
     return net
+
 '''
 # ------------------------------
 # Inicializar KEEP + LoRA

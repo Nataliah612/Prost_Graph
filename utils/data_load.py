@@ -21,7 +21,7 @@ def create_file_label_df(embedding_path, data_path,slide_col = 'image_id', NAME=
     gleason_secondary_list = []
 
     df = pd.read_excel(data_path)
-    df = df.head(100)
+    df = df.head(50)
 
     embeddings = [f for f in os.listdir(embedding_path) if f.endswith('.h5')]
 
