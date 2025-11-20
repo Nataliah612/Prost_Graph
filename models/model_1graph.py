@@ -1,15 +1,16 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torch_geometric import data
-from torch_geometric.data import DataLoader
-from torch_geometric.nn import GATConv, GATv2Conv
-from torch_geometric.data import Batch
+
 from torch import Tensor
-from typing import Tuple
+
+from torch_geometric.nn import GATv2Conv
 from torch_geometric.data import Data
+from torch_geometric.data import Batch
+from torch_geometric.utils import softmax
+
 import os
-from transformers import AutoModel 
+from transformers import AutoModel , BitsAndBytesConfig
 
 from peft import get_peft_model,IA3Config
 
@@ -25,8 +26,181 @@ def weights_init(m):
         if m.bias is not None:
             nn.init.zeros_(m.bias)
 
+def get_keep_ia3_model():
+    model_name = "Astaxanthin/KEEP"
 
-class adj(nn.Module):
+    # 1. Cargar modelo en 8 bits o 4 bits (MUCHO AHORRO DE MEMORIA)
+    bnb_config = BitsAndBytesConfig(
+    load_in_4bit=True,
+    bnb_4bit_compute_dtype=torch.float16,
+    bnb_4bit_use_double_quant=True,
+    bnb_4bit_quant_type="nf4",
+    )
+    model = AutoModel.from_pretrained(
+        model_name,
+        trust_remote_code=True,
+        #load_in_4bit=True,        # <--- MUY IMPORTANTE |load_in_8bit
+        #_from_auto = True, 
+        quantization_config=bnb_config,
+        force_download=True,
+        low_cpu_mem_usage = True
+    )
+
+    # 2. Activar gradient checkpointing para reducir VRAM
+    if hasattr(model, "gradient_checkpointing"):
+        model.gradient_checkpointing = True
+
+    # 3. Reducir uso de memoria durante forward
+    model.config.use_cache = False
+
+    # 5. Identificar módulos lineales donde aplicar IA3
+    target_modules = []
+    for name, module in model.named_modules():
+        if isinstance(module, nn.Linear) and any(
+            key in name for key in ["mlp.fc1", "mlp.fc2"]
+        ):
+            target_modules.append(name)
+
+    ia3_config = IA3Config(
+        target_modules=target_modules,
+        feedforward_modules=target_modules,
+        task_type="FEATURE_EXTRACTION"
+    )
+
+    ia3_model = get_peft_model(model, ia3_config)
+    # 4. Activar torch.compile si usas PyTorch 2.0+
+    model = torch.compile(model)
+    # 6. Congelar TODO menos IA3
+    for name, param in ia3_model.named_parameters():
+        #if "fc1.ia3" not in name :
+        if "blocks.23.mlp.fc1.ia3" not in name and "blocks.22.mlp.fc1.ia3" not in name:
+            param.requires_grad = False
+    # 7. Envolver con tu modelo final
+    net = KEEPForGleason(ia3_model, model_graph)
+
+    return net
+
+class KEEPForGleason(nn.Module):
+    def __init__(self, base_model, classifier_model):
+        super().__init__()
+        self.base = base_model
+
+        # Cabezal más expresivo con normalización, activación y dropout
+        self.classifier = classifier_model()
+        self.classifier.apply(weights_init)
+
+    def forward(self, images):
+        # Codificación del encoder visual
+        features_list = [torch.stack([self.base.encode_image(patch.unsqueeze(dim=0).to(dtype=torch.float16)) for patch in img.squeeze(0)])for img in images]
+        logits = self.classifier(features_list)
+        return logits
+
+class model_graph(nn.Module):
+    def __init__(self):
+        super(model_graph, self).__init__()
+        self.graphgat = gat()
+        #self.adj = adj()
+
+        # mover módulos al device por defecto
+        self.to(device)
+
+    def forward(self, x, y=None):
+        """
+        x: tensor (B, N, D) 
+        """
+        graphs_list = [grafo_fully_connected(xi.squeeze(dim=1)) for xi in x]
+       
+        out, w1 = self.graphgat(graphs_list)
+        return torch.stack(out), w1
+
+def grafo_fully_connected(x):
+    num_nodos = x.shape[0]
+    
+    # Creamos todas las combinaciones posibles
+    fila = torch.arange(num_nodos).repeat_interleave(num_nodos)
+    col = torch.arange(num_nodos).repeat(num_nodos)
+    
+    # Quitamos autoconexiones si quieres
+    mask = fila != col
+    edge_index = torch.stack([fila[mask], col[mask]], dim=0)
+
+    return Data(x=x, edge_index=edge_index)
+
+class gat(torch.nn.Module):
+    def __init__(self, heads=8):
+        super(gat, self).__init__()
+        self.gat1 = GATv2Conv(768, 256, heads=heads, concat=False)
+        self.gat2 = GATv2Conv(256, 64, heads=heads, concat=False)
+
+        self.Aggr = Aggregate_Attnt(L=768, I=1)   # Debe aceptar batch
+        self.fc = mlp(in_dim=64, out_dim=4)
+
+    def forward(self, graph_list):
+        # 1) Empaquetar graphs en un solo batch
+
+        batch = Batch.from_data_list(graph_list)
+        batch = batch.to(device)
+
+        x, edge_index, batch_idx = batch.x, batch.edge_index, batch.batch
+        lengths = batch.ptr[1:] - batch.ptr[:-1]   # patches por WSI
+
+        # 2) GATConv en TODO el batch a la vez (¡sin bucles!)
+        z = self.gat1(x, edge_index)
+        z = F.relu(z)
+
+        z = self.gat2(z, edge_index)
+        z = F.relu(z)
+
+        # 3) Clasificador por patch
+        logits = self.fc(z)
+        probs = torch.softmax(logits, dim=1)
+
+        # 4) MIL aggregation por WSI usando batch_idx
+        w = self.Aggr(x, batch_idx)      # tu atención debe soportar batching
+
+        # 5) Weighted max per WSI
+        weighted = w * probs             # (N_total, 4)
+
+        # 6) Reconstruir patch predictions por WSI
+        patch_output = torch.split(weighted, lengths.tolist(), dim=0)
+        out_wsi = [torch.max(p,dim=0)[0] for p in patch_output]
+
+        return out_wsi, patch_output
+
+class Aggregate_Attnt(nn.Module):
+    def __init__(self, L=512, I=1):
+        super().__init__()
+        D = L // 2
+        self.branch_1 = nn.Sequential(nn.Linear(L, D), nn.Tanh())
+        self.branch_2 = nn.Sequential(nn.Linear(L, D), nn.Sigmoid())
+        self.branch_3 = nn.Linear(D, I)
+        weights_init(self)
+
+    def forward(self, x: Tensor, batch_idx: Tensor):
+        xa = self.branch_1(x)
+        xb = self.branch_2(x)
+        A = xa.mul(xb)
+        A = self.branch_3(A)
+        gate = softmax(A, index=batch_idx, num_nodes=x.size(0))
+        #gate = torch.softmax(A, dim=0)
+        return gate
+
+
+class mlp(nn.Module):
+    def __init__(self, in_dim=64, out_dim=4):
+        super().__init__()
+        self.ln = nn.LayerNorm(in_dim)
+        self.dropout = nn.Dropout(0.3)
+        self.fc = nn.Linear(in_dim, out_dim)
+
+    def forward(self, x):
+        x = self.ln(x)
+        x = F.relu(x)
+        x = self.dropout(x)
+        x = self.fc(x)
+        return x
+    
+'''class adj(nn.Module):
     """
     MLP que da un score escalar entre 0 y 1 para cada par (node_i, node_j).
     He reducido dims intermedios para ahorrar memoria; si necesitas capacidad,
@@ -141,220 +315,7 @@ def build_attention_graph_chunked(node_features: Tensor,
     edge_index = torch.cat(edge_index_parts, dim=1)  # (2, E)
     edge_attr = torch.cat(edge_attr_parts, dim=0)    # (E,)
 
-    return edge_index.long(), edge_attr.float()
-
-
-
-
-class Aggregate_Attnt(nn.Module):
-    def __init__(self, L=512, I=1):
-        super().__init__()
-        D = L // 2
-        self.branch_1 = nn.Sequential(nn.Linear(L, D), nn.Tanh())
-        self.branch_2 = nn.Sequential(nn.Linear(L, D), nn.Sigmoid())
-        self.branch_3 = nn.Linear(D, I)
-        weights_init(self)
-
-    def forward(self, x: Tensor, dim: int = -2):
-        xa = self.branch_1(x)
-        xb = self.branch_2(x)
-        A = xa.mul(xb)
-        A = self.branch_3(A)
-        gate = torch.softmax(A, dim=0)
-        return gate
-
-
-class mlp(nn.Module):
-    def __init__(self, in_dim=128, out_dim=4):
-        super(mlp, self).__init__()
-        # BatchNorm1d requiere input (B, C) — si tienes (N_nodes, C) está bien.
-        self.bn = nn.BatchNorm1d(in_dim)
-        self.dropout = nn.Dropout(0.3)
-        self.bn1 = nn.BatchNorm1d(64)
-        self.fc = nn.Linear(64, out_dim)
-        weights_init(self)
-
-    def forward(self, x):
-        x = self.bn(x)
-        x = F.relu(x)
-        x = self.dropout(x)
-        x = self.bn1(x)
-        x = F.relu(x)
-        x = self.dropout(x)
-        x = self.fc(x)
-        return x
-
-
-class gat(torch.nn.Module):
-    def __init__(self, heads=8):
-        super(gat, self).__init__()
-        # GATConv( in_channels, out_channels_per_head, heads, edge_dim, concat=False )
-        self.gat1 = GATv2Conv(768, 64, heads=heads, concat=False) #edge_dim=1
-        self.Aggr = Aggregate_Attnt(L=768, I=1)
-        self.fc = mlp(in_dim=64, out_dim=4)
-
-    def forward(self, graph_list):
-        #x, edge_index, batch, ptr = batch.dataset, batch.edge_index, batch.batch, batch.ptr
-        #batch = Batch.from_data_list(graphs_list, )
-        #batch = batch.to(device)
-        #x, edge_index, batch = batch.dataset, batch.edge_index, batch.batch
-        #out = model(batch.x, batch.edge_index, batch.batch)
-        wsi_pred, patch_pred = [],[]
-         
-        for i in range(len(graph_list)):
-            graph = graph_list[i]
-            x, edge_index = graph.x, graph.edge_index
-            edge_index = edge_index.to(x.device)
-            if x.dim() == 3:
-                x = x.squeeze(dim=1)   # elimina batch extra
-            if x.dim() == 1:
-                x = x.unsqueeze(dim=0)
-            # GATConv puede requerir float32 si usas BatchNorm después; mantén dtype coherente.
-            z= self.gat1(x, edge_index)#, edge_weight, return_attention_weights=False)
-            z = F.relu(z)
-
-            w = self.Aggr(x)  # ojo: en tu versión original pasabas batch; aquí usamos x
-            z = self.fc(z)
-            z = torch.softmax(z, dim=0)
-            out, x_ind = torch.max(w * z, dim=0)
-
-            wsi_pred.append(out)
-            patch_pred.append(z)
-        wsi_output = torch.stack(wsi_pred, dim=0)
-        from torch.nn.utils.rnn import pad_sequence
-        patch_output = pad_sequence(patch_pred, batch_first=True)
-        #patch_output  = torch.stack(patch_pred_padding, dim=1)
-        
-        return wsi_output, patch_output
-
-def grafo_fully_connected(x ):
-    num_nodos = x.shape[0]
-    
-    # Creamos todas las combinaciones posibles
-    fila = torch.arange(num_nodos).repeat_interleave(num_nodos)
-    col = torch.arange(num_nodos).repeat(num_nodos)
-    
-    # Quitamos autoconexiones si quieres
-    mask = fila != col
-    edge_index = torch.stack([fila[mask], col[mask]], dim=0)
-
-    return Data(x=x, edge_index=edge_index)
-
-
-class model_graph(nn.Module):
-    def __init__(self):
-        super(model_graph, self).__init__()
-        self.graphgat = gat()
-        self.adj = adj()
-
-        # mover módulos al device por defecto
-        self.to(device)
-
-    def forward(self, fea_o, y=None):
-        """
-        fea_o: tensor (N, D) o (B, N, D) según tu pipeline original.
-        En el código original había operaciones confusas de indexado; aquí
-        asumo fea_o es (N, D) con nodos que pueden ser todo ceros (invalidos).
-        """
-        # Mascara de nodos válidos (suma != 0)
-        '''valid_nodes_mask = (fea_o.sum(-1) != 0)
-        valid_idx = torch.nonzero(valid_nodes_mask, as_tuple=False).view(-1)
-
-        if valid_idx.numel() == 0:
-            # nada válido
-            return torch.empty((0, 4), device=fea_o.device), torch.empty((0,), device=fea_o.device)'''
-
-        x = fea_o#[valid_idx]  # (N_valid, D)
-
-        # Construir grafo con atención con chunking para ahorrar memoria
-        #edge_index1, edge_attr1 = build_attention_graph_chunked(x, self.adj, k=8, chunk_size=512)
-
-        #data_list1 = data.Data(x=x, edge_index=edge_index1, edge_attr=edge_attr1)
-        graphs_list = [grafo_fully_connected(xi.squeeze(dim=1)) for xi in x]
-        
-
-        #graph_batch = Batch.from_data_list(graphs_list)
-        #graph_batch = DataLoader(graphs_list, batch_size=len(graphs_list), shuffle=True)
-        #pred_wsi, weights = [],[]
-        #for i in range(len(data_list1)):
-        # Asegurar 2D
-       
-        out, w1 = self.graphgat(graphs_list)
-
-        #w1 = w1.view(-1)
-            
-        return out, w1
-
-
-class KEEPForGleason(nn.Module):
-    def __init__(self, base_model, classifier_model):
-        super().__init__()
-        self.base = base_model
-
-        # Cabezal más expresivo con normalización, activación y dropout
-        self.classifier = classifier_model()
-
-        # Inicialización de pesos (mejor estabilidad)
-        for m in self.classifier.modules():
-            if isinstance(m, nn.Linear):
-                nn.init.xavier_uniform_(m.weight)
-                if m.bias is not None:
-                    nn.init.zeros_(m.bias)
-
-    def forward(self, images):
-        # Codificación del encoder visual
-        features_list = [torch.stack([self.base.encode_image(patch.unsqueeze(dim=0).to(dtype=torch.float16)) for patch in img.squeeze(0)])for img in images]
-        #
-        logits = self.classifier(features_list)
-        return logits
-
-def get_keep_ia3_model():
-    model_name = "Astaxanthin/KEEP"
-
-    # 1. Cargar modelo en 8 bits o 4 bits (MUCHO AHORRO DE MEMORIA)
-    model = AutoModel.from_pretrained(
-        model_name,
-        trust_remote_code=True,
-        load_in_8bit=True,        # <--- MUY IMPORTANTE
-        _from_auto = True
-    )
-
-    # 2. Activar gradient checkpointing para reducir VRAM
-    if hasattr(model, "gradient_checkpointing"):
-        model.gradient_checkpointing = True
-
-    # 3. Reducir uso de memoria durante forward
-    model.config.use_cache = False
-
-    # 4. Activar torch.compile si usas PyTorch 2.0+
-    model = torch.compile(model)
-
-    # 5. Identificar módulos lineales donde aplicar IA3
-    target_modules = []
-    for name, module in model.named_modules():
-        if isinstance(module, nn.Linear) and any(
-            key in name for key in ["mlp.fc1", "mlp.fc2"]
-        ):
-            target_modules.append(name)
-
-    ia3_config = IA3Config(
-        target_modules=target_modules,
-        feedforward_modules=target_modules,
-        task_type="FEATURE_EXTRACTION"
-    )
-
-    ia3_model = get_peft_model(model, ia3_config)
-
-    # 6. Envolver con tu modelo final
-    net = KEEPForGleason(ia3_model, model_graph)
-
-    # 7. Congelar TODO menos IA3
-    for name, param in ia3_model.named_parameters():
-        #if "fc1.ia3" not in name :
-        if "blocks.23.mlp.fc1.ia3" not in name:
-            param.requires_grad = False
-
-    return net
+    return edge_index.long(), edge_attr.float()'''
 
 '''
 # ------------------------------

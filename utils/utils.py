@@ -42,7 +42,6 @@ def run_epoch(model, dataloader, device, accelerator,
     # Acumuladores
     all_y_true_primary, all_y_true_secondary = [], []
     all_y_pred_primary, all_y_pred_secondary = [], []
-    all_probs_primary, all_probs_secondary = [], []
     all_probs, all_y_true_onehot = [],[]
 
     total_loss_sum = 0.0
@@ -70,12 +69,9 @@ def run_epoch(model, dataloader, device, accelerator,
         # --- Forward ---
         # (El modelo mueve internamente los inputs al device)
         
-
         # dentro del training loop
         with autocast(dtype=torch.float16):
             wsi_prediction, patchs_prediction = model(inputs)
-
-        #wsi_prediction, patchs_prediction = model(inputs) # wsi_prediction: Tensor (B,4) , patchs_prediction: list of B tensors, cada uno (N_patches,4)
 
         # --- Cálculo de proporciones por WSI (media de probabilidades por parche) ---
         # Si algún WSI tuviera 0 parches, usamos vector ceros (Aunque eso debería evitarse)
@@ -83,15 +79,10 @@ def run_epoch(model, dataloader, device, accelerator,
             p.mean(dim=0) if p.numel() > 0 else torch.zeros(wsi_prediction.size(1), device=wsi_prediction.device)
             for p in patchs_prediction
         ], dim=0)  # (B,4)
-
-        # print("\n[EPOCH] WSI prediction:", wsi_prediction.shape)
-        # for i, p in enumerate(patchs_prediction):
-        #     print(f"[EPOCH]  WSI {i} patch preds shape: {p.shape}")
-        # print("[EPOCH] wsi_proportions:", wsi_proportions.shape)
     
         # --- Cálculo de pérdidas ---
         loss = loss_BCE(wsi_prediction, y_onehot)
-        #loss_pe_pc = loss_restrictions(wsi_proportions, alpha_pe= 0.1, alpha_pc=1)
+        loss_pe_pc = loss_restrictions(wsi_proportions, alpha_pe= 0.1, alpha_pc=1)
         total_loss = loss #+ loss_pe_pc
 
         # --- Backpropagation ---

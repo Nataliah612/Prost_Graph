@@ -2,21 +2,19 @@ import os
 import itertools
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 import torch.optim as optim
-import pandas as pd
 from sklearn.model_selection import train_test_split
 from torch.utils.data import DataLoader
 import gc
-from tqdm import tqdm
+import time 
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 
 from accelerate import Accelerator
 
 # =============== IMPORT FUNCIONES ======================
-from models.model_1graph import weights_init,get_keep_ia3_model
+from models.model_1graph import get_keep_ia3_model
 from utils.data_load import create_file_label_df, RAM_WSI_Dataset, collate_fn
-from utils.utils import compute_metrics,run_epoch
+from utils.utils import run_epoch
 
 
 os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "max_split_size_mb:128"
@@ -25,15 +23,16 @@ gc.collect()
 # =================== HIPERPARÉMETROS ===================
 LEARNING_RATES = [1e-3]#, 1e-5, 1e-6,1e-4]
 EPOCHS_RANGE = [100]
-BATCH_SIZES = [4]#, 128, 64,32]
+BATCH_SIZES = [16]#, 128, 64,32]
 PATIENCE = 20
 RANDOM_SEED = 98
 num_workers = 2
 
 # =================== CONFIGURACION MODELOS ===================
-BASE_PATH = "/workspace/results"
+BASE_PATH = "/workspace/Prost_Graph/results"
 
 use_amp = torch.cuda.is_available()  # mixed precision if GPU available
+
 
 for lr, batch, epochs in itertools.product(LEARNING_RATES, BATCH_SIZES, EPOCHS_RANGE):
     name = f"try_{lr}_{batch}_{epochs}"
@@ -55,10 +54,10 @@ for lr, batch, epochs in itertools.product(LEARNING_RATES, BATCH_SIZES, EPOCHS_R
         'results_sicap': os.path.join(BASE_PATH, name),
         'results_path': os.path.join(BASE_PATH, name, 'result_mdl.xlsx'),
         'model_path': os.path.join(BASE_PATH, name, 'best_model.pth'),
-        'embedding_path':  '/workspace/data/pandas/patches',
-        'data_path':  '/workspace/data/datos_PANDAS.xlsx',
-        'sicap_path_embeddings': '/workspace/data/features_SICAP/patches',
-        'excel_path_sicap': '/workspace/data/wsi_labels_changed.xlsx',
+        'panda_embeddings':  '/workspace/data/pandas/patches',
+        'panda_data_path':  '/workspace/data/datos_PANDAS.xlsx',
+        'sicap_embeddings': '/workspace/data/features_SICAP/patches',
+        'sicap_data_path': '/workspace/data/wsi_labels_changed_SICAP.xlsx',
     }
 
     # Model Configuration 
@@ -66,8 +65,11 @@ for lr, batch, epochs in itertools.product(LEARNING_RATES, BATCH_SIZES, EPOCHS_R
     model = torch.nn.SyncBatchNorm.convert_sync_batchnorm(model)
     
     # Loading Data
-    print("Preparing Data ...")
-    df_train = create_file_label_df(paths["embedding_path"], paths["data_path"])
+    print("Preparing DataSet SICAP ...")
+    os.makedirs(os.path.dirname(paths['output_file']), exist_ok=True)
+    with open(paths['output_file'], "w") as f:
+            f.write(f"Creating Dataset SICAP \n")
+    df_train = create_file_label_df(paths["sicap_embeddings"], paths["sicap_data_path"], NAME = 'SICAP')
 
     label_mapping = {0: 0, 1: 0, 2: 0, 3: 1, 4: 2, 5: 3}
     df_train['gleason_primary_mapped'] = df_train['gleason_primary'].map(label_mapping)
@@ -84,20 +86,25 @@ for lr, batch, epochs in itertools.product(LEARNING_RATES, BATCH_SIZES, EPOCHS_R
     if torch.cuda.is_available():
         dl_kwargs["pin_memory"] = True
 
+    inicio__load = time.time() 
     print("Loading embeddings for Training ...")
     train_loader = DataLoader(RAM_WSI_Dataset(df_train, train_idx,random_subsets=True ), shuffle=True, **dl_kwargs)
     print("Loading embeddings for Validation ...")
     val_loader = DataLoader(RAM_WSI_Dataset(df_train, val_idx), shuffle=False, **dl_kwargs)
     print("Loading embeddings for Test ...")
     test_loader = DataLoader(RAM_WSI_Dataset(df_train, test_idx), shuffle=False, **dl_kwargs)
+    fin__load = time.time()
+
+    time_load = fin__load - inicio__load
+
+    with open(paths['output_file'], "a") as f:
+        f.write(f"Time for loading data : {time_load} \n")
 
     # loss / optimizer / scheduler
     loss = nn.BCEWithLogitsLoss()
-    #model.apply(weights_init)
-    optimizer = optim.AdamW(model.parameters(), lr=params["lr"], weight_decay=1e-5)
+    
+    optimizer = optim.SGD(model.parameters(), lr=params["lr"], weight_decay=1e-5) # Adam -> SGD
     scheduler = ReduceLROnPlateau(optimizer, mode="min", factor=0.1, patience=PATIENCE, verbose=True)
-
-    scaler = torch.cuda.amp.GradScaler(enabled=use_amp)  # si no hay GPU, no hace nada
 
     torch.cuda.empty_cache()
     model, optimizer, train_loader, val_loader, test_loader = accelerator.prepare(
@@ -131,17 +138,17 @@ for lr, batch, epochs in itertools.product(LEARNING_RATES, BATCH_SIZES, EPOCHS_R
                 print('Early stopping activado - Entrenamiento finalizado ', flush=True)
                 break
 
-        print(f"Epoch {epoch} | Train Loss: {train_loss:.4f} Acc: {train_metrics[0]:.4f}")
-        print(f"           Val Loss: {val_loss:.4f} Acc: {val_metrics[0]:.4f} Kappa: {val_metrics[-1]:.4f}")
+        print(f"Epoch {epoch} | Train Loss: {train_loss:.4f} Acc: {train_metrics['global'][0]:.4f}")
+        print(f"           Val Loss: {val_loss:.4f} Acc: {val_metrics['global'][0]:.4f} Kappa: {val_metrics['global'][-1]:.4f}")
 
         with open(paths['output_file'], "a") as f:
             f.write(
-                f"Epoch {epoch}|    Train Loss: {train_loss:.4f} Acc: {train_metrics[0]:.4f}\n"
-                f"          Val Loss: {val_loss:.4f}         Acc: {val_metrics[0]:.4f}    Kappa: {val_metrics[-1]:.4f}\n")
+                f"Epoch {epoch}|    Train Loss: {train_loss:.4f} Acc: {train_metrics['global'][0]:.4f}\n"
+                f"          Val Loss: {val_loss:.4f}         Acc: {val_metrics['global'][0]:.4f}    Kappa: {val_metrics['global'][-1]:.4f}\n")
 
     # TEST
     model.eval()
-    test_metrics, test_loss = run_epoch(model, val_loader, device, accelerator, loss, optimizer, mode='test')   
+    test_metrics, test_loss = run_epoch(model, test_loader, device, accelerator, loss, optimizer, mode='test')   
 
     print(f"Test Loss: {test_loss:.4f} Acc: {test_metrics[0]:.4f} Kappa: {test_metrics[-1]:.4f}")
     with open(paths['output_file'], "a") as f:

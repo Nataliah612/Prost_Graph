@@ -14,36 +14,39 @@ import gc
 from tqdm import tqdm
 import sys
 
-def create_file_label_df(embedding_path, data_path,slide_col = 'image_id', NAME=''):
-    patch_list = []
+def create_file_label_df(images_path, data_path, NAME='', slide_col='image_id', small_dataset_for_test = False):
+    patch_list,patient_list  = [], []
     gleason_score = []
-    gleason_primary_list = []
-    gleason_secondary_list = []
-
+    gleason_primary_list,gleason_secondary_list  = [], []
     df = pd.read_excel(data_path)
-    df = df.head(50)
+    
+    df = df.head(200) if small_dataset_for_test else df
 
-    embeddings = [f for f in os.listdir(embedding_path) if f.endswith('.h5')]
-
-    # Agrega tqdm aquí
-    for f in tqdm(embeddings, desc="Reading DataFrame"):
+    wsis = [f for f in os.listdir(images_path) if f.endswith('.h5')]
+    for f in tqdm(wsis, desc="Procesando WSIs", file=sys.stdout):
         slide_id = f.split('.h5')[0]
         if NAME == 'SICAP':
             slide_id = slide_id.split('_')[0]
         row = df[df[slide_col] == slide_id]
 
         if not row.empty:
-            ruta_h5 = os.path.join(embedding_path, f)
-
+            ruta_h5 = os.path.join(images_path, f)
+         
             gleason = row[['gleason_score']].values
+            if 'patient_id' in df.columns:
+                patient_select=row['patient_id'].values
+            else:
+                patient_select = row['image_id'].values
 
             gleason_score.append(gleason.item())
             patch_list.append(ruta_h5)
+            patient_list.append(patient_select)
             gleason_primary_list.append(row['gleason_primary'].values[0])
             gleason_secondary_list.append(row['gleason_secondary'].values[0])
 
     df_train = pd.DataFrame({
         'patch': patch_list,
+        'patients':patient_list,
         'gleason_score': gleason_score,
         'gleason_primary': gleason_primary_list,
         'gleason_secondary': gleason_secondary_list
@@ -77,12 +80,18 @@ class RAM_WSI_Dataset(Dataset):
             self.len_subset = len(self.indices)
 
         # Transformaciones básicas
-        self.transform = T.Compose([
+        '''self.transform = T.Compose([
             T.ToTensor(),
-            T.Resize((224, 224)),
+            T.Resize((224, 224), antialias=True),
             T.Normalize(mean=[0.5, 0.5, 0.5],
                         std=[0.5, 0.5, 0.5])
-        ])
+        ])'''
+        self.transform = T.Compose([
+        T.Resize(size=224, interpolation=T.InterpolationMode.BICUBIC),
+        T.CenterCrop(size=(224, 224)),
+        T.ToTensor(),
+        T.Normalize(mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225))
+    ])
 
         # Precargar imágenes y etiquetas en RAM
         self.images, self.labels = [], []
