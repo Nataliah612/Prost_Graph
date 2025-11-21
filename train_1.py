@@ -29,7 +29,7 @@ RANDOM_SEED = 98
 num_workers = 2
 
 # =================== CONFIGURACION MODELOS ===================
-BASE_PATH = "/workspace/Prost_Graph/results"
+BASE_PATH = "/workspace/results"
 
 use_amp = torch.cuda.is_available()  # mixed precision if GPU available
 
@@ -104,11 +104,12 @@ for lr, batch, epochs in itertools.product(LEARNING_RATES, BATCH_SIZES, EPOCHS_R
     loss = nn.BCEWithLogitsLoss()
     
     optimizer = optim.SGD(model.parameters(), lr=params["lr"], weight_decay=1e-5) # Adam -> SGD
-    scheduler = ReduceLROnPlateau(optimizer, mode="min", factor=0.1, patience=PATIENCE, verbose=True)
+    #scheduler = ReduceLROnPlateau(optimizer, mode="min", factor=0.1, patience=PATIENCE, verbose=True)
+    scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=3, gamma=0.7)
 
     torch.cuda.empty_cache()
-    model, optimizer, train_loader, val_loader, test_loader = accelerator.prepare(
-            model, optimizer, train_loader, val_loader, test_loader )
+    model, optimizer, train_loader, val_loader, test_loader, scheduler = accelerator.prepare(
+            model, optimizer, train_loader, val_loader, test_loader, scheduler )
     
     best_loss = float("inf")
     no_improve = 0
@@ -118,11 +119,11 @@ for lr, batch, epochs in itertools.product(LEARNING_RATES, BATCH_SIZES, EPOCHS_R
         print(f"\nEpoch {epoch}")
         # TRAIN
         model.train()
-        train_metrics, train_loss = run_epoch(model, train_loader, device, accelerator, loss, optimizer, mode='train')
+        train_metrics, train_loss = run_epoch(model, train_loader, device, accelerator, loss, optimizer, scheduler, mode='train')
 
         # VALIDATION
         model.eval()
-        val_metrics, val_loss = run_epoch(model, val_loader, device, accelerator, loss, optimizer, mode = 'val')
+        val_metrics, val_loss = run_epoch(model, val_loader, device, accelerator, loss, optimizer,scheduler, mode = 'val')
        
         scheduler.step(val_loss)
        

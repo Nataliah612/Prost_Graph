@@ -111,7 +111,8 @@ class model_graph(nn.Module):
         graphs_list = [grafo_fully_connected(xi.squeeze(dim=1)) for xi in x]
        
         out, w1 = self.graphgat(graphs_list)
-        return torch.stack(out), w1
+        out = torch.sigmoid(torch.stack(out))
+        return out, w1
 
 def grafo_fully_connected(x):
     num_nodos = x.shape[0]

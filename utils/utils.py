@@ -18,7 +18,7 @@ def _to_numpy(x):
     return x
 
 def run_epoch(model, dataloader, device, accelerator, 
-              loss_BCE, optimizer=None, 
+              loss_BCE, optimizer=None, scheduler = None,
               args=None, mode="train"):
     """
     Ejecuta una época completa (train, val o test) y devuelve métricas y pérdida media.
@@ -49,6 +49,8 @@ def run_epoch(model, dataloader, device, accelerator,
 
     # Modo del modelo
     model.train() if mode == "train" else model.eval()
+
+    scheduler.step(mode == "train") 
 
     # Desactivar gradientes si no es entrenamiento
     torch.set_grad_enabled(mode == "train")
@@ -90,6 +92,8 @@ def run_epoch(model, dataloader, device, accelerator,
             optimizer.zero_grad()
             accelerator.backward(total_loss)
             optimizer.step()
+        
+        
 
         # --- Acumulación de pérdidas ---
         batch_sz = len(inputs)
