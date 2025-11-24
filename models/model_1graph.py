@@ -3,7 +3,6 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from torch import Tensor
-from torch_geometric.nn import knn_graph
 
 from torch_geometric.nn import GATv2Conv
 from torch_geometric.data import Data
@@ -11,7 +10,7 @@ from torch_geometric.data import Batch
 from torch_geometric.utils import softmax
 
 import os
-from transformers import AutoModel , BitsAndBytesConfig
+from transformers import AutoModel, BitsAndBytesConfig
 
 from peft import get_peft_model,IA3Config #, LoraConfig
 
@@ -19,7 +18,6 @@ os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "max_split_size_mb:128"
 
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 print("CUDA available:", torch.cuda.is_available(), "  n_gpus:", torch.cuda.device_count())
-
 
 def weights_init(m):
     if isinstance(m, nn.Linear):
@@ -44,13 +42,10 @@ def get_keep_ia3_model():
         force_download=True,                # Descarga del modelo 
         low_cpu_mem_usage = True            # Reduce memoria en la carga
     )
-    
-    #model.train()
-    
+        
     # Activar gradient checkpointing para reducir VRAM
     if hasattr(model, "gradient_checkpointing"):
         model.gradient_checkpointing = True
-
     
     model.config.use_cache = False  # Reducir uso de memoria durante forward
 
@@ -74,19 +69,16 @@ def get_keep_ia3_model():
     # Congelar TODO menos IA3
     for name, param in ia3_model.named_parameters():
         #if "fc1.ia3" not in name :
-        if "blocks.23.mlp.fc1.ia3" not in name and "blocks.22.mlp.fc1.ia3" not in name :
+        if "blocks.23.mlp.fc1.ia3" not in name and "blocks.22.mlp.fc1.ia3" not in name and "blocks.21.mlp.fc1.ia3" not in name :
             param.requires_grad = False
     # 7. Envolver con tu modelo final
     net = KEEPForGleason(ia3_model, model_graph)
-
     return net
 
 class KEEPForGleason(nn.Module):
     def __init__(self, base_model, classifier_model):
         super().__init__()
         self.base = base_model
-
-        # Cabezal más expresivo con normalización, activación y dropout
         self.classifier = classifier_model()
         self.classifier.apply(weights_init)
 
@@ -102,16 +94,14 @@ class model_graph(nn.Module):
         self.graphgat = gat()
         self.to(device)
 
-    def forward(self, x, y=None):
+    def forward(self, x):
         """
         x: tensor (B, N, D) 
         """
         graphs_list = [grafo_fully_connected(xi.squeeze(dim=1)) for xi in x]
        
         out, w1 = self.graphgat(graphs_list)
-        #out = torch.sigmoid(torch.stack(out))
         return out, w1
-
 
 def grafo_fully_connected(x):
     num_nodos = x.shape[0]
@@ -139,15 +129,15 @@ class gat(torch.nn.Module):
         self.fc = mlp(in_dim=64, out_dim=4)
 
     def forward(self, graph_list):
+        
         # 1) Empaquetar graphs en un solo batch
-
         batch = Batch.from_data_list(graph_list)
         batch = batch.to(device)
 
         x, edge_index, batch_idx = batch.x, batch.edge_index, batch.batch
         lengths = batch.ptr[1:] - batch.ptr[:-1]   # patches por WSI
 
-        # 2) GATConv en TODO el batch a la vez (¡sin bucles!)
+        # 2) GATConv 
         z1 = self.gat1(x, edge_index)
         z1 = F.relu(z1)
 
@@ -187,7 +177,6 @@ class Aggregate_Attnt(nn.Module):
         gate = softmax(A, index=batch_idx, num_nodes=x.size(0))
         return gate
 
-
 class mlp(nn.Module):
     def __init__(self, in_dim=64, out_dim=4):
         super().__init__()
@@ -201,157 +190,8 @@ class mlp(nn.Module):
         x = self.dropout(x)
         x = self.fc(x)
         return x
-    
-'''class adj(nn.Module):
-    """
-    MLP que da un score escalar entre 0 y 1 para cada par (node_i, node_j).
-    He reducido dims intermedios para ahorrar memoria; si necesitas capacidad,
-    aumenta hidden1/hidden2.
-    """
-    def __init__(self, in_dim=768, hidden1=256, hidden2=64):
-        super(adj, self).__init__()
-        self.mlp = nn.Sequential(
-            nn.Linear(in_dim * 2, hidden1),
-            nn.ReLU(),
-            nn.Linear(hidden1, hidden2),
-            nn.ReLU(),
-            nn.Linear(hidden2, 1)
-        )
-        self.sig = nn.Sigmoid()
-        weights_init(self)
 
-    def forward(self, node_i: Tensor, node_j: Tensor) -> Tensor:
-        # node_i: (M, D), node_j: (M, D)  -> output (M,)
-        pair = torch.cat([node_i, node_j], dim=-1)
-        out = self.mlp(pair)
-        return self.sig(out).view(-1)
-
-
-def build_attention_graph_chunked(node_features: Tensor,
-                                  adj_model: nn.Module,
-                                  k: int = 8,
-                                  exclude_self: bool = True,
-                                  chunk_size: int = 1024
-                                  ) -> Tuple[torch.LongTensor, torch.FloatTensor]:
-    """
-    Construye edge_index y edge_attr sin materializar NxN completo.
-    - node_features: (N, D)
-    - adj_model: recibe (M, D) y devuelve (M,) con gradientes
-    - chunk_size: número de targets a procesar por chunk para reducir memoria
-    Devuelve edge_index (2, E) y edge_attr (E,)
-    """
-
-    N, D = node_features.shape
-    dev = node_features.device
-
-    if N == 0:
-        return torch.empty((2, 0), dtype=torch.long, device=dev), torch.empty((0,), dtype=torch.float, device=dev)
-
-    edge_index_parts = []
-    edge_attr_parts = []
-
-    # Procesamos por cada nodo fuente i
-    # Para cada i, evaluamos scores contra todos los j en chunks
-    for i in range(N):
-        src = node_features[i].unsqueeze(0)  # (1, D)
-        scores_chunks = []
-        idx_chunks = []
-
-        # recorrer targets en chunks para evitar NxN
-        j = 0
-        while j < N:
-            j_end = min(N, j + chunk_size)
-            targets = node_features[j:j_end]  # (chunk, D)
-
-            # si exclude_self y i dentro del chunk, lo saltamos manualmente
-            if exclude_self and (j <= i < j_end):
-                # concatenamos los targets sin el self
-                if j == i and j_end == i + 1:
-                    # chunk contiene sólo self -> saltar
-                    j = j_end
-                    continue
-                # else: split the chunk into up to two parts skipping self
-                parts = []
-                if j < i:
-                    parts.append((j, i))
-                if i + 1 < j_end:
-                    parts.append((i + 1, j_end))
-                # evaluar cada parte
-                for (a, b) in parts:
-                    tgt = node_features[a:b]
-                    src_rep = adj_model(src, tgt)  # modificar adj para soportar broadcasting
-                    # (M, D)
-                    # (M,)
-                    scores_chunks.append(sc)
-                    idx_chunks.append(torch.arange(a, b, device=dev))
-            else:
-                src_rep = src.expand(targets.size(0), -1)
-                sc = adj_model(src_rep, targets)  # (M,)
-                scores_chunks.append(sc)
-                idx_chunks.append(torch.arange(j, j_end, device=dev))
-
-            j = j_end
-
-        if len(scores_chunks) == 0:
-            continue
-
-        # concatenar scores para el origen i (pero en memoria sólo M ~ N)
-        att_i = torch.cat(scores_chunks, dim=0)  # (N' <= N-1)
-        indices_i = torch.cat(idx_chunks, dim=0)  # indices de destino relativos al original
-
-        # Seleccionar top-k
-        topk = min(k, att_i.numel())
-        if topk == 0:
-            continue
-        topk_idx = torch.topk(att_i, topk, largest=True).indices  # índices en att_i
-        selected_targets = indices_i[topk_idx]                     # destinos reales
-
-        # construir edge_index para este i
-        src_tensor = torch.full_like(selected_targets, i, dtype=torch.long, device=dev)
-        edge_index_parts.append(torch.stack([src_tensor, selected_targets], dim=0))
-        edge_attr_parts.append(att_i[topk_idx])
-
-    if len(edge_index_parts) == 0:
-        return torch.empty((2, 0), dtype=torch.long, device=dev), torch.empty((0,), dtype=torch.float, device=dev)
-
-    edge_index = torch.cat(edge_index_parts, dim=1)  # (2, E)
-    edge_attr = torch.cat(edge_attr_parts, dim=0)    # (E,)
-
-    return edge_index.long(), edge_attr.float()'''
-
-'''
-# ------------------------------
-# Inicializar KEEP + LoRA
-# ------------------------------
-def get_keep_lora_model():
-    model_name = "Astaxanthin/KEEP"
-    model = AutoModel.from_pretrained(model_name, trust_remote_code=True)
-    model.eval()
-
-    target_modules = []
-    for name, module in model.named_modules():
-        if isinstance(module, nn.Linear) and any(key in name for key in ["attn.qkv", "attn.proj", "mlp.fc1", "mlp.fc2"]):
-            target_modules.append(name)
-
-    lora_config = LoraConfig(
-        r=4,  # más capacidad representativa
-        lora_alpha=8,  # proporcional al rango
-        target_modules=target_modules,
-        lora_dropout=0.3,  # regulariza para dataset pequeño/desbalanceado
-        bias="none",
-        task_type="FEATURE_EXTRACTION"
-    )
-
-    lora_model = get_peft_model(model, lora_config)
-    net = KEEPForGleason(lora_model, model_graph)
-
-    # Congelar todos los parámetros que no son LoRA
-    for name, param in lora_model.named_parameters():
-        if "mlp.fc1.lora_A" not in name:
-            param.requires_grad = False
-
-    return net
-from transformers import AutoModel, BitsAndBytesConfig
+'''from transformers import AutoModel, BitsAndBytesConfig
 import torch.nn as nn
 from peft import LoraConfig, get_peft_model
 import torch
@@ -379,7 +219,7 @@ def get_keep_lora_model():
     
     # Asegúrate de que el modelo base esté en modo train para LoRA
     # aunque la mayoría de los parámetros están congelados.
-    model.train() 
+    
 
     # ... (El resto de tu código LoRA/PEFT sigue aquí)
     

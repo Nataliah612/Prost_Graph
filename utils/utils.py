@@ -84,16 +84,14 @@ def run_epoch(model, dataloader, device, accelerator,
     
         # --- Cálculo de pérdidas ---
         loss = loss_BCE(wsi_prediction, y_onehot)
-        loss_pe_pc = loss_restrictions(wsi_proportions, alpha_pe= 0.1, alpha_pc=1)
-        total_loss = loss #+ loss_pe_pc
+        loss_pe_pc = loss_restrictions(wsi_proportions, alpha_pe= 0.1, alpha_pc=0.1)
+        total_loss = loss + loss_pe_pc
 
         # --- Backpropagation ---
         if mode == "train":
             optimizer.zero_grad()
             accelerator.backward(total_loss)
             optimizer.step()
-        
-        
 
         # --- Acumulación de pérdidas ---
         batch_sz = len(inputs)

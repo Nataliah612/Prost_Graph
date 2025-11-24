@@ -32,7 +32,6 @@ BASE_PATH = "/workspace/results"
 
 use_amp = torch.cuda.is_available()  # mixed precision if GPU available
 
-
 for lr, batch, epochs in itertools.product(LEARNING_RATES, BATCH_SIZES, EPOCHS_RANGE):
     name = f"try_{lr}_{batch}_{epochs}"
     
@@ -77,7 +76,6 @@ for lr, batch, epochs in itertools.product(LEARNING_RATES, BATCH_SIZES, EPOCHS_R
 
     # Spliting data
     train_val_idx, test_idx = train_test_split(df_train.index, test_size=0.15, stratify=df_train["gleason_score"])
-
     train_idx, val_idx = train_test_split(train_val_idx, test_size=0.10, stratify=df_train.loc[train_val_idx]["gleason_score"])
    
     # DataLoaders
@@ -100,10 +98,9 @@ for lr, batch, epochs in itertools.product(LEARNING_RATES, BATCH_SIZES, EPOCHS_R
         f.write(f"Time for loading data : {time_load} \n")
 
     # loss / optimizer / scheduler
-    loss = nn.BCEWithLogitsLoss() #nn.BCEWithLogitsLoss()
+    loss = nn.BCEWithLogitsLoss() 
     
     optimizer = optim.SGD(model.parameters(), lr=params["lr"], weight_decay=1e-5) # Adam -> SGD
-    #scheduler = ReduceLROnPlateau(optimizer, mode="min", factor=0.1, patience=PATIENCE, verbose=True)
     scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=3, gamma=0.7)
 
     torch.cuda.empty_cache()
@@ -138,18 +135,19 @@ for lr, batch, epochs in itertools.product(LEARNING_RATES, BATCH_SIZES, EPOCHS_R
                 break
 
         print(f"Epoch {epoch} | Train Loss: {train_loss:.4f} Acc: {train_metrics['global'][0]:.4f}")
-        print(f"           Val Loss: {val_loss:.4f} Acc: {val_metrics['global'][0]:.4f} Kappa: {val_metrics['global'][-1]:.4f}")
+        print(f"           Val Loss: {val_loss:.4f} Acc_global: {val_metrics['global'][0]:.4f} Kappa_global: {val_metrics['global'][-1]:.4f} | Acc_primary: {val_metrics['primary'][0]:.4f} Kappa_primary: {val_metrics['primary'][-1]:.4f} |Acc_secondary: {val_metrics['secondary'][0]:.4f} Kappa_secondary: {val_metrics['secondary'][-1]:.4f} ")
 
-        with open(paths['output_file'], "a") as f:
+        with open(paths['output_file'], "a") as f: 
             f.write(
                 f"Epoch {epoch}|    Train Loss: {train_loss:.4f} Acc: {train_metrics['global'][0]:.4f}\n"
-                f"          Val Loss: {val_loss:.4f}         Acc: {val_metrics['global'][0]:.4f}    Kappa: {val_metrics['global'][-1]:.4f}\n")
+                f"          Val Loss: {val_loss:.4f} Acc_global: {val_metrics['global'][0]:.4f} Kappa_global: {val_metrics['global'][-1]:.4f} | Acc_primary: {val_metrics['primary'][0]:.4f} Kappa_primary: {val_metrics['primary'][-1]:.4f} |Acc_secondary: {val_metrics['secondary'][0]:.4f} Kappa_secondary: {val_metrics['secondary'][-1]:.4f} ")
 
     # TEST
     model.eval()
     test_metrics, test_loss = run_epoch(model, test_loader, device, accelerator, loss, optimizer, mode='test')   
 
     print(f"Test Loss: {test_loss:.4f} Acc: {test_metrics[0]:.4f} Kappa: {test_metrics[-1]:.4f}")
+    print(f"Test Loss: {test_loss:.4f} Acc_global: {test_metrics['global'][0]:.4f} Kappa_global: {test_metrics['global'][-1]:.4f} | Acc_primary: {test_metrics['primary'][0]:.4f} Kappa_primary: {test_metrics['primary'][-1]:.4f} |Acc_secondary: {test_metrics['secondary'][0]:.4f} Kappa_secondary: {test_metrics['secondary'][-1]:.4f} ")
     with open(paths['output_file'], "a") as f:
-        f.write(f" Test Loss: {test_loss:.4f}       Acc: {test_metrics[0]:.4f}   Kappa: {test_metrics[-1]:.4f}\n")
+        f.write(f" Test Loss: {test_loss:.4f}  Acc_global: {test_metrics['global'][0]:.4f} Kappa_global: {test_metrics['global'][-1]:.4f} | Acc_primary: {test_metrics['primary'][0]:.4f} Kappa_primary: {test_metrics['primary'][-1]:.4f} |Acc_secondary: {test_metrics['secondary'][0]:.4f} Kappa_secondary: {test_metrics['secondary'][-1]:.4f}\n")
         f.write(f"Acuracy: {test_metrics[0]}, | Precision: {test_metrics[1]} | Recall : {test_metrics[2]}| F1 Score: {test_metrics[3]}")
