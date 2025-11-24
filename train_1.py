@@ -16,14 +16,13 @@ from models.model_1graph import get_keep_ia3_model
 from utils.data_load import create_file_label_df, RAM_WSI_Dataset, collate_fn
 from utils.utils import run_epoch
 
-
 os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "max_split_size_mb:128"
 gc.collect()
 
 # =================== HIPERPARÉMETROS ===================
-LEARNING_RATES = [1e-3]#, 1e-5, 1e-6,1e-4]
+LEARNING_RATES = [1e-2]#, 1e-5, 1e-6,1e-4]
 EPOCHS_RANGE = [100]
-BATCH_SIZES = [16]#, 128, 64,32]
+BATCH_SIZES = [4]#, 128, 64,32]
 PATIENCE = 20
 RANDOM_SEED = 98
 num_workers = 2
@@ -101,7 +100,7 @@ for lr, batch, epochs in itertools.product(LEARNING_RATES, BATCH_SIZES, EPOCHS_R
         f.write(f"Time for loading data : {time_load} \n")
 
     # loss / optimizer / scheduler
-    loss = nn.BCEWithLogitsLoss()
+    loss = nn.BCEWithLogitsLoss() #nn.BCEWithLogitsLoss()
     
     optimizer = optim.SGD(model.parameters(), lr=params["lr"], weight_decay=1e-5) # Adam -> SGD
     #scheduler = ReduceLROnPlateau(optimizer, mode="min", factor=0.1, patience=PATIENCE, verbose=True)
@@ -113,26 +112,25 @@ for lr, batch, epochs in itertools.product(LEARNING_RATES, BATCH_SIZES, EPOCHS_R
     
     best_loss = float("inf")
     no_improve = 0
-    best_validation_loss=1000
 
     for epoch in range(params["epochs"]):
         print(f"\nEpoch {epoch}")
         # TRAIN
         model.train()
-        train_metrics, train_loss = run_epoch(model, train_loader, device, accelerator, loss, optimizer, scheduler, mode='train')
+        train_metrics, train_loss = run_epoch(model, train_loader, device, accelerator, loss, optimizer, mode='train')
 
         # VALIDATION
         model.eval()
-        val_metrics, val_loss = run_epoch(model, val_loader, device, accelerator, loss, optimizer,scheduler, mode = 'val')
+        val_metrics, val_loss = run_epoch(model, val_loader, device, accelerator, loss, optimizer,mode = 'val')
        
         scheduler.step(val_loss)
        
         #  Early Stopping / Checkpoint
-        if val_loss < best_validation_loss:
-            best_validation_loss, no_improve = val_loss, 0
+        if val_loss < best_loss:
+            best_loss, no_improve = val_loss, 0
             if accelerator.is_main_process:
                 accelerator.save_model(model, paths['model_path'])
-                print(f"Mejor modelo guardado en {paths['model_path']} con val_loss: {best_validation_loss:.4f}", flush=True)
+                print(f"Mejor modelo guardado en {paths['model_path']} con val_loss: {best_loss:.4f}", flush=True)
         else:
             no_improve += 1
             if no_improve >= PATIENCE:

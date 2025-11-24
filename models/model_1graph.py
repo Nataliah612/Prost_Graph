@@ -3,6 +3,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from torch import Tensor
+from torch_geometric.nn import knn_graph
 
 from torch_geometric.nn import GATv2Conv
 from torch_geometric.data import Data
@@ -12,7 +13,7 @@ from torch_geometric.utils import softmax
 import os
 from transformers import AutoModel , BitsAndBytesConfig
 
-from peft import get_peft_model,IA3Config
+from peft import get_peft_model,IA3Config #, LoraConfig
 
 os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "max_split_size_mb:128"
 
@@ -27,37 +28,37 @@ def weights_init(m):
             nn.init.zeros_(m.bias)
 
 def get_keep_ia3_model():
-    model_name = "Astaxanthin/KEEP"
+    model_name = "Astaxanthin/KEEP" # Modelo preentrenado 
 
-    # 1. Cargar modelo en 8 bits o 4 bits (MUCHO AHORRO DE MEMORIA)
     bnb_config = BitsAndBytesConfig(
-    load_in_4bit=True,
-    bnb_4bit_compute_dtype=torch.float16,
-    bnb_4bit_use_double_quant=True,
-    bnb_4bit_quant_type="nf4",
+        load_in_4bit=True,                      # Modelo cuantificado en 4 bits 
+        bnb_4bit_compute_dtype=torch.float16,   # Float16 para maentener la velocidad y precision 
+        bnb_4bit_use_double_quant=True,         # Usa doble cuanticicacion
+        bnb_4bit_quant_type="nf4",              # Variante de tipo de cuqntificacion de 4 bits 
     )
-    model = AutoModel.from_pretrained(
+   
+    model = AutoModel.from_pretrained( # Carga el modelo 
         model_name,
-        trust_remote_code=True,
-        #load_in_4bit=True,        # <--- MUY IMPORTANTE |load_in_8bit
-        #_from_auto = True, 
-        quantization_config=bnb_config,
-        force_download=True,
-        low_cpu_mem_usage = True
+        trust_remote_code=True,             # Ejecuta el codio en remoto
+        quantization_config=bnb_config,     # Introduce la configuracion de carga del modelo
+        force_download=True,                # Descarga del modelo 
+        low_cpu_mem_usage = True            # Reduce memoria en la carga
     )
-
-    # 2. Activar gradient checkpointing para reducir VRAM
+    
+    #model.train()
+    
+    # Activar gradient checkpointing para reducir VRAM
     if hasattr(model, "gradient_checkpointing"):
         model.gradient_checkpointing = True
 
-    # 3. Reducir uso de memoria durante forward
-    model.config.use_cache = False
+    
+    model.config.use_cache = False  # Reducir uso de memoria durante forward
 
-    # 5. Identificar módulos lineales donde aplicar IA3
+    # Identificar módulos lineales donde aplicar IA3
     target_modules = []
     for name, module in model.named_modules():
         if isinstance(module, nn.Linear) and any(
-            key in name for key in ["mlp.fc1", "mlp.fc2"]
+            key in name for key in ["attn.qkv", "attn.proj", "mlp.fc1", "mlp.fc2"]#, "mlp.fc2"]
         ):
             target_modules.append(name)
 
@@ -68,12 +69,12 @@ def get_keep_ia3_model():
     )
 
     ia3_model = get_peft_model(model, ia3_config)
-    # 4. Activar torch.compile si usas PyTorch 2.0+
-    model = torch.compile(model)
-    # 6. Congelar TODO menos IA3
+   
+    model = torch.compile(model) # Activar torch.compile si usas PyTorch 2.0+
+    # Congelar TODO menos IA3
     for name, param in ia3_model.named_parameters():
         #if "fc1.ia3" not in name :
-        if "blocks.23.mlp.fc1.ia3" not in name and "blocks.22.mlp.fc1.ia3" not in name:
+        if "blocks.23.mlp.fc1.ia3" not in name and "blocks.22.mlp.fc1.ia3" not in name :
             param.requires_grad = False
     # 7. Envolver con tu modelo final
     net = KEEPForGleason(ia3_model, model_graph)
@@ -99,9 +100,6 @@ class model_graph(nn.Module):
     def __init__(self):
         super(model_graph, self).__init__()
         self.graphgat = gat()
-        #self.adj = adj()
-
-        # mover módulos al device por defecto
         self.to(device)
 
     def forward(self, x, y=None):
@@ -111,8 +109,9 @@ class model_graph(nn.Module):
         graphs_list = [grafo_fully_connected(xi.squeeze(dim=1)) for xi in x]
        
         out, w1 = self.graphgat(graphs_list)
-        out = torch.sigmoid(torch.stack(out))
+        #out = torch.sigmoid(torch.stack(out))
         return out, w1
+
 
 def grafo_fully_connected(x):
     num_nodos = x.shape[0]
@@ -133,7 +132,10 @@ class gat(torch.nn.Module):
         self.gat1 = GATv2Conv(768, 256, heads=heads, concat=False)
         self.gat2 = GATv2Conv(256, 64, heads=heads, concat=False)
 
-        self.Aggr = Aggregate_Attnt(L=768, I=1)   # Debe aceptar batch
+        self.Aggr1 = Aggregate_Attnt(L=768, I=1)   # Debe aceptar batch
+        self.Aggr2 = Aggregate_Attnt(L=256, I=1)
+        self.Aggr3 = Aggregate_Attnt(L=64, I=1)
+
         self.fc = mlp(in_dim=64, out_dim=4)
 
     def forward(self, graph_list):
@@ -146,27 +148,28 @@ class gat(torch.nn.Module):
         lengths = batch.ptr[1:] - batch.ptr[:-1]   # patches por WSI
 
         # 2) GATConv en TODO el batch a la vez (¡sin bucles!)
-        z = self.gat1(x, edge_index)
-        z = F.relu(z)
+        z1 = self.gat1(x, edge_index)
+        z1 = F.relu(z1)
 
-        z = self.gat2(z, edge_index)
-        z = F.relu(z)
+        z2 = self.gat2(z1, edge_index)
+        z2 = F.relu(z2)
 
         # 3) Clasificador por patch
-        logits = self.fc(z)
+        logits = self.fc(z2)
         probs = torch.softmax(logits, dim=1)
 
         # 4) MIL aggregation por WSI usando batch_idx
-        w = self.Aggr(x, batch_idx)      # tu atención debe soportar batching
-
+        #w1 = self.Aggr1(x, batch_idx)    
+        #w2 = self.Aggr2(z1, batch_idx)
+        #w3 = self.Aggr2(z2, batch_idx)
         # 5) Weighted max per WSI
-        weighted = w * probs             # (N_total, 4)
+        #weighted = w * probs             # (N_total, 4)
 
         # 6) Reconstruir patch predictions por WSI
-        patch_output = torch.split(weighted, lengths.tolist(), dim=0)
+        patch_output = torch.split(probs, lengths.tolist(), dim=0)
         out_wsi = [torch.max(p,dim=0)[0] for p in patch_output]
 
-        return out_wsi, patch_output
+        return torch.stack(out_wsi), patch_output
 
 class Aggregate_Attnt(nn.Module):
     def __init__(self, L=512, I=1):
@@ -175,7 +178,6 @@ class Aggregate_Attnt(nn.Module):
         self.branch_1 = nn.Sequential(nn.Linear(L, D), nn.Tanh())
         self.branch_2 = nn.Sequential(nn.Linear(L, D), nn.Sigmoid())
         self.branch_3 = nn.Linear(D, I)
-        weights_init(self)
 
     def forward(self, x: Tensor, batch_idx: Tensor):
         xa = self.branch_1(x)
@@ -183,7 +185,6 @@ class Aggregate_Attnt(nn.Module):
         A = xa.mul(xb)
         A = self.branch_3(A)
         gate = softmax(A, index=batch_idx, num_nodes=x.size(0))
-        #gate = torch.softmax(A, dim=0)
         return gate
 
 
@@ -333,10 +334,10 @@ def get_keep_lora_model():
             target_modules.append(name)
 
     lora_config = LoraConfig(
-        r=8,  # más capacidad representativa
-        lora_alpha=16,  # proporcional al rango
+        r=4,  # más capacidad representativa
+        lora_alpha=8,  # proporcional al rango
         target_modules=target_modules,
-        lora_dropout=0.1,  # regulariza para dataset pequeño/desbalanceado
+        lora_dropout=0.3,  # regulariza para dataset pequeño/desbalanceado
         bias="none",
         task_type="FEATURE_EXTRACTION"
     )
@@ -345,8 +346,68 @@ def get_keep_lora_model():
     net = KEEPForGleason(lora_model, model_graph)
 
     # Congelar todos los parámetros que no son LoRA
-    for name, param in net.named_parameters():
-        if "lora_" not in name:
+    for name, param in lora_model.named_parameters():
+        if "mlp.fc1.lora_A" not in name:
             param.requires_grad = False
+
+    return net
+from transformers import AutoModel, BitsAndBytesConfig
+import torch.nn as nn
+from peft import LoraConfig, get_peft_model
+import torch
+
+# ----------------------------------------------------
+# Inicializar KEEP + LoRA con 4-bit Quantization
+# ----------------------------------------------------
+def get_keep_lora_model():
+    model_name = "Astaxanthin/KEEP"
+    
+    # 1. Configurar la Cuantización de 4 bits (NF4)
+    bnb_config = BitsAndBytesConfig(
+        load_in_4bit=True, # <--- Carga el modelo en 4-bits
+        bnb_4bit_compute_dtype=torch.bfloat16, # <--- Usa bfloat16 para el cómputo (mejor que float16 si tu GPU lo soporta)
+        bnb_4bit_use_double_quant=True,
+        bnb_4bit_quant_type="nf4",
+    )
+    
+    model = AutoModel.from_pretrained(
+        model_name, 
+        trust_remote_code=True, 
+        quantization_config=bnb_config, # <--- Aplicar la configuración
+        low_cpu_mem_usage=True
+    )
+    
+    # Asegúrate de que el modelo base esté en modo train para LoRA
+    # aunque la mayoría de los parámetros están congelados.
+    model.train() 
+
+    # ... (El resto de tu código LoRA/PEFT sigue aquí)
+    
+    target_modules = []
+    for name, module in model.named_modules():
+        if isinstance(module, nn.Linear) and any(key in name for key in ["attn.qkv", "attn.proj", "mlp.fc1", "mlp.fc2"]):
+            target_modules.append(name)
+
+    lora_config = LoraConfig(
+        r=4,  # más capacidad representativa
+        lora_alpha=8,  # proporcional al rango
+        target_modules=target_modules,
+        lora_dropout=0.3,  # regulariza para dataset pequeño/desbalanceado
+        bias="none",
+        task_type="FEATURE_EXTRACTION"
+    )
+
+    lora_model = get_peft_model(model, lora_config)
+    
+    # 3. Optimización: Desactivar cache y activar Gradient Checkpointing
+    lora_model.config.use_cache = False # Desactiva la cache para reducir memoria en la inferencia
+    if hasattr(lora_model, "gradient_checkpointing"):
+        lora_model.gradient_checkpointing = True # <--- MUY IMPORTANTE
+    
+    # 5. Compilación (PyTorch 2.0+)
+    lora_model = torch.compile(lora_model)
+
+    # 6. Envolver en tu modelo final
+    net = KEEPForGleason(lora_model, model_graph)
 
     return net'''
