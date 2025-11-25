@@ -50,8 +50,6 @@ def run_epoch(model, dataloader, device, accelerator,
     # Modo del modelo
     model.train() if mode == "train" else model.eval()
 
-     
-
     # Desactivar gradientes si no es entrenamiento
     torch.set_grad_enabled(mode == "train")
 
