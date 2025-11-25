@@ -21,7 +21,7 @@ gc.collect()
 
 # =================== HIPERPARÉMETROS ===================
 LEARNING_RATES = [1e-2]#, 1e-5, 1e-6,1e-4]
-EPOCHS_RANGE = [100]
+EPOCHS_RANGE = [20]
 BATCH_SIZES = [4]#, 128, 64,32]
 PATIENCE = 20
 RANDOM_SEED = 98
@@ -100,7 +100,7 @@ for lr, batch, epochs in itertools.product(LEARNING_RATES, BATCH_SIZES, EPOCHS_R
     # loss / optimizer / scheduler
     loss = nn.BCEWithLogitsLoss() 
     
-    optimizer = optim.SGD(model.parameters(), lr=params["lr"], weight_decay=1e-5) # Adam -> SGD
+    optimizer = optim.SGD(model.parameters(), lr=params["lr"], weight_decay=1e-5, momentum=0.9) # Adam -> SGD
     scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=3, gamma=0.7)
 
     torch.cuda.empty_cache()
@@ -138,9 +138,8 @@ for lr, batch, epochs in itertools.product(LEARNING_RATES, BATCH_SIZES, EPOCHS_R
         print(f"           Val Loss: {val_loss:.4f} Acc_global: {val_metrics['global'][0]:.4f} Kappa_global: {val_metrics['global'][-1]:.4f} | Acc_primary: {val_metrics['primary'][0]:.4f} Kappa_primary: {val_metrics['primary'][-1]:.4f} |Acc_secondary: {val_metrics['secondary'][0]:.4f} Kappa_secondary: {val_metrics['secondary'][-1]:.4f} ")
 
         with open(paths['output_file'], "a") as f: 
-            f.write(
-                f"Epoch {epoch}|    Train Loss: {train_loss:.4f} Acc: {train_metrics['global'][0]:.4f}\n"
-                f"          Val Loss: {val_loss:.4f} Acc_global: {val_metrics['global'][0]:.4f} Kappa_global: {val_metrics['global'][-1]:.4f} | Acc_primary: {val_metrics['primary'][0]:.4f} Kappa_primary: {val_metrics['primary'][-1]:.4f} |Acc_secondary: {val_metrics['secondary'][0]:.4f} Kappa_secondary: {val_metrics['secondary'][-1]:.4f} ")
+            f.write(f"Epoch {epoch}|    Train Loss: {train_loss:.4f} Acc: {train_metrics['global'][0]:.4f}\n")
+            f.write(f"          Val Loss: {val_loss:.4f} Acc_global: {val_metrics['global'][0]:.4f} Kappa_global: {val_metrics['global'][-1]:.4f} | Acc_primary: {val_metrics['primary'][0]:.4f} Kappa_primary: {val_metrics['primary'][-1]:.4f} |Acc_secondary: {val_metrics['secondary'][0]:.4f} Kappa_secondary: {val_metrics['secondary'][-1]:.4f} ")
 
     # TEST
     model.eval()
