@@ -20,7 +20,7 @@ def create_file_label_df(images_path, data_path, NAME='', slide_col='image_id', 
     gleason_primary_list,gleason_secondary_list  = [], []
     df = pd.read_excel(data_path)
     
-    df = df.head(100)# if small_dataset_for_test else df
+    df = df.head(100) if small_dataset_for_test else df
 
     wsis = [f for f in os.listdir(images_path) if f.endswith('.h5')]
     for f in tqdm(wsis, desc="Procesando WSIs", file=sys.stdout):

@@ -121,11 +121,9 @@ class gat(torch.nn.Module):
         super(gat, self).__init__()
         self.gat1 = GATv2Conv(768, 256, heads=heads, concat=False)
         self.gat2 = GATv2Conv(256, 64, heads=heads, concat=False)
-
-        self.Aggr1 = Aggregate_Attnt(L=768, I=1)   # Debe aceptar batch
-        self.Aggr2 = Aggregate_Attnt(L=256, I=1)
-        self.Aggr3 = Aggregate_Attnt(L=64, I=1)
-
+         # Debe aceptar batch
+        self.Aggr = Aggregate_Attnt(L=256, I=1)
+        #self.Aggr.apply(weights_init)
         self.fc = mlp(in_dim=64, out_dim=4)
 
     def forward(self, graph_list):
@@ -148,16 +146,16 @@ class gat(torch.nn.Module):
         logits = self.fc(z2)
         probs = torch.softmax(logits, dim=1)
 
-        # 4) MIL aggregation por WSI usando batch_idx
-        #w1 = self.Aggr1(x, batch_idx)    
-        #w2 = self.Aggr2(z1, batch_idx)
-        #w3 = self.Aggr2(z2, batch_idx)
+        # 4) MIL aggregation por WSI usando batch_idx   
+        w2 = self.Aggr(z1, batch_idx)
+        
         # 5) Weighted max per WSI
-        #weighted = w * probs             # (N_total, 4)
+        weighted = w2 * probs             # (N_total, 4)
 
         # 6) Reconstruir patch predictions por WSI
         patch_output = torch.split(probs, lengths.tolist(), dim=0)
-        out_wsi = [torch.max(p,dim=0)[0] for p in patch_output]
+        out_wsi = [torch.sum(weighted,dim=0) for p in patch_output]
+        #out_wsi = [torch.max(weighted,dim=0)[0] for p in patch_output]
 
         return torch.stack(out_wsi), patch_output
 

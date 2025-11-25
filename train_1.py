@@ -20,8 +20,8 @@ os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "max_split_size_mb:128"
 gc.collect()
 
 # =================== HIPERPARÉMETROS ===================
-LEARNING_RATES = [1e-2]#, 1e-5, 1e-6,1e-4]
-EPOCHS_RANGE = [20]
+LEARNING_RATES = [1e-3]#, 1e-5, 1e-6,1e-4]
+EPOCHS_RANGE = [100]
 BATCH_SIZES = [4]#, 128, 64,32]
 PATIENCE = 20
 RANDOM_SEED = 98
@@ -140,7 +140,7 @@ for lr, batch, epochs in itertools.product(LEARNING_RATES, BATCH_SIZES, EPOCHS_R
         with open(paths['output_file'], "a") as f: 
             f.write(f"Epoch {epoch}|    Train Loss: {train_loss:.4f} Acc: {train_metrics['global'][0]:.4f}\n")
             f.write(f"          Val Loss: {val_loss:.4f} Acc_global: {val_metrics['global'][0]:.4f} Kappa_global: {val_metrics['global'][-1]:.4f} | Acc_primary: {val_metrics['primary'][0]:.4f} Kappa_primary: {val_metrics['primary'][-1]:.4f} |Acc_secondary: {val_metrics['secondary'][0]:.4f} Kappa_secondary: {val_metrics['secondary'][-1]:.4f} ")
-
+            
     # TEST
     model.eval()
     test_metrics, test_loss = run_epoch(model, test_loader, device, accelerator, loss, optimizer, mode='test')   
@@ -150,3 +150,4 @@ for lr, batch, epochs in itertools.product(LEARNING_RATES, BATCH_SIZES, EPOCHS_R
     with open(paths['output_file'], "a") as f:
         f.write(f" Test Loss: {test_loss:.4f}  Acc_global: {test_metrics['global'][0]:.4f} Kappa_global: {test_metrics['global'][-1]:.4f} | Acc_primary: {test_metrics['primary'][0]:.4f} Kappa_primary: {test_metrics['primary'][-1]:.4f} |Acc_secondary: {test_metrics['secondary'][0]:.4f} Kappa_secondary: {test_metrics['secondary'][-1]:.4f}\n")
         f.write(f"Acuracy: {test_metrics[0]}, | Precision: {test_metrics[1]} | Recall : {test_metrics[2]}| F1 Score: {test_metrics[3]}")
+        f.write(f"Métricas : {test_metrics}")
