@@ -15,6 +15,9 @@ from transformers import AutoModel, BitsAndBytesConfig
 from peft import get_peft_model,IA3Config #, LoraConfig
 
 os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "max_split_size_mb:128"
+os.environ["HF_HOME"] = "/workspace/results/.cache"
+os.environ["TRANSFORMERS_CACHE"] = "/workspace/results/.cache"
+os.environ["HF_MODULES_CACHE"] = "/workspace/results/.cache"
 
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 print("CUDA available:", torch.cuda.is_available(), "  n_gpus:", torch.cuda.device_count())
