@@ -32,21 +32,20 @@ def parse_args():
 
     parser.add_argument("--inference",action="store_true",default=False, help="Usar una BBDD para hacer inferencia despues del entrenamiento.")
 
-
     parser.add_argument("--results_path", type=str, default='/workspace/results', help="Ruta donde se guardaran los resultados")
 
     parser.add_argument("--batch_size", type=int, default=4, help="Tamaño de batch")
-    parser.add_argument("--learning_rate", type=float, default=1e-2, help="Learning rate")
+    parser.add_argument("--learning_rate", type=float, default=1e-4, help="Learning rate")
     parser.add_argument("--weight_decay", type=float, default=1e-5, help="Weight decay")
     parser.add_argument("--momentum", type=float, default=0.9, help="Momentum")
-    parser.add_argument("--epochs", type=int, default=100, help="Número de épocas")
+    parser.add_argument("--epochs", type=int, default=20, help="Número de épocas")
     parser.add_argument("--patience", type=int, default=20, help="Paciencia para early stopping")
 
     parser.add_argument("--seed", type=int, default=98, help="Semilla aleatoria")
     parser.add_argument("--num_workers", type=int, default=2, help="Numero de paralelizaciones")
 
-    parser.add_argument("--alpha_pe", default=0.1, type=float)
-    parser.add_argument("--alpha_pc", default=0.1, type=float)
+    parser.add_argument("--alpha_pe", default=0.01, type=float)
+    parser.add_argument("--alpha_pc", default=0.01, type=float)
 
     return parser.parse_args()
 

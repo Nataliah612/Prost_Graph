@@ -63,7 +63,6 @@ def get_keep_ia3_model():
             target_modules.append(name)
 
     ia3_config = IA3Config(
-        perf_type='IA3',
         target_modules=target_modules,
         feedforward_modules=target_modules,
         task_type="FEATURE_EXTRACTION" #SEQ_CLS
