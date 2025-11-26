@@ -30,6 +30,9 @@ def parse_args():
     parser.add_argument("--data_sicap_patches", type=str, default='/workspace/data/features_SICAP/patches', help="Ruta de carpeta con imágenes WSI de SICAP en .h5 (Dentro deben contener parches)")
     parser.add_argument("--data_sicap_path", type=str, default='/workspace/data/wsi_labels_changed_SICAP.xlsx', help="Ruta del archivo Excel con etiquetas de las WSI de SICAP asociadas a la ruta del .h5")
 
+    parser.add_argument("--inference",action="store_true",default=False, help="Usar una BBDD para hacer inferencia despues del entrenamiento.")
+
+
     parser.add_argument("--results_path", type=str, default='/workspace/results', help="Ruta donde se guardaran los resultados")
 
     parser.add_argument("--batch_size", type=int, default=4, help="Tamaño de batch")
@@ -137,11 +140,9 @@ for epoch in range(args.epochs):
         f.write(f"\nEpoch {epoch}\n")
     
     # TRAIN
-    model.train()
     train_metrics, train_loss = run_epoch(model, train_loader, device, accelerator, loss, optimizer, mode='train', args=args)
 
     # VALIDATION
-    model.eval()
     val_metrics, val_loss = run_epoch(model, val_loader, device, accelerator, loss, optimizer, mode = 'val',args=args)
     
     scheduler.step(val_loss)
@@ -166,8 +167,7 @@ for epoch in range(args.epochs):
         f.write(f"Epoch {epoch}|    Train Loss: {train_loss:.4f} Acc: {train_metrics['global'][0]:.4f}\n")
         f.write(f"          Val Loss: {val_loss:.4f} Acc_global: {val_metrics['global'][0]:.4f} Kappa_global: {val_metrics['global'][-1]:.4f} | Acc_primary: {val_metrics['primary'][0]:.4f} Kappa_primary: {val_metrics['primary'][-1]:.4f} |Acc_secondary: {val_metrics['secondary'][0]:.4f} Kappa_secondary: {val_metrics['secondary'][-1]:.4f} ")
         
-# TEST
-model.eval()
+# =================== TEST ===================
 test_metrics, test_loss = run_epoch(model, test_loader, device, accelerator, loss, optimizer, mode='test',args=args)   
 
 print(f"Test Loss: {test_loss:.4f} Acc: {test_metrics[0]:.4f} Kappa: {test_metrics[-1]:.4f}")
@@ -176,3 +176,28 @@ with open(paths['output_file'], "a") as f:
     f.write(f" Test Loss: {test_loss:.4f}  Acc_global: {test_metrics['global'][0]:.4f} Kappa_global: {test_metrics['global'][-1]:.4f} | Acc_primary: {test_metrics['primary'][0]:.4f} Kappa_primary: {test_metrics['primary'][-1]:.4f} |Acc_secondary: {test_metrics['secondary'][0]:.4f} Kappa_secondary: {test_metrics['secondary'][-1]:.4f}\n")
     f.write(f"Acuracy: {test_metrics[0]}, | Precision: {test_metrics[1]} | Recall : {test_metrics[2]}| F1 Score: {test_metrics[3]}")
     f.write(f"Métricas : {test_metrics}")
+
+# =================== INFERENCE ===================
+if args.inference == True: 
+        
+    with open(paths['output_file'], "a") as f:
+        f.write(f"Inference in SICAP \n")
+        
+    df_test = create_file_label_df(args.data_sicap_patches, args.data_sicap_path, NAME = 'SICAP')
+
+    label_mapping = {0: 0, 1: 0, 2: 0, 3: 1, 4: 2, 5: 3}
+    df_test['gleason_primary_mapped'] = df_test['gleason_primary'].map(label_mapping)
+    df_test['gleason_secondary_mapped'] = df_test['gleason_secondary'].map(label_mapping)
+    df_test['gleason_score'] = df_test['gleason_score'].astype(int)
+
+    print("Loading embeddings for Inference ...")
+    inference_loader = DataLoader(RAM_WSI_Dataset(df_test, df_test.index), shuffle=False, **dl_kwargs)
+
+    inference_metrics, inference_loss = run_epoch(model, inference_loader, device, accelerator, loss, optimizer, mode='test',args=args)   
+
+    print(f"Test Loss: {inference_loss:.4f} Acc: {inference_metrics[0]:.4f} Kappa: {inference_metrics[-1]:.4f}")
+    print(f"Test Loss: {inference_loss:.4f} Acc_global: {inference_metrics['global'][0]:.4f} Kappa_global: {inference_metrics['global'][-1]:.4f} | Acc_primary: {inference_metrics['primary'][0]:.4f} Kappa_primary: {inference_metrics['primary'][-1]:.4f} |Acc_secondary: {inference_metrics['secondary'][0]:.4f} Kappa_secondary: {inference_metrics['secondary'][-1]:.4f} ")
+    with open(paths['output_file'], "a") as f:
+        f.write(f" Test Loss: {inference_loss:.4f}  Acc_global: {inference_metrics['global'][0]:.4f} Kappa_global: {inference_metrics['global'][-1]:.4f} | Acc_primary: {inference_metrics['primary'][0]:.4f} Kappa_primary: {inference_metrics['primary'][-1]:.4f} |Acc_secondary: {inference_metrics['secondary'][0]:.4f} Kappa_secondary: {inference_metrics['secondary'][-1]:.4f}\n")
+        f.write(f"Acuracy: {inference_metrics[0]}, | Precision: {inference_metrics[1]} | Recall : {inference_metrics[2]}| F1 Score: {inference_metrics[3]}")
+        f.write(f"Métricas : {inference_metrics}")
