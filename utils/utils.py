@@ -1,6 +1,8 @@
 import torch
-import torch.nn as nn
 
+import numpy as np 
+import os 
+import random
 from tqdm import tqdm 
 import sys 
 import math
@@ -16,6 +18,47 @@ def _to_numpy(x):
     if isinstance(x, torch.Tensor):
         x = x.detach().cpu().numpy()
     return x
+def set_multiple_seed(seed: int = 42, deterministic: bool = True):
+    """
+    Fija las semillas para reproducibilidad en Python, NumPy y PyTorch.
+    
+    Args:
+        seed (int): Valor de la semilla a usar (por defecto 42).
+        deterministic (bool): Si True, fuerza operaciones deterministas en CUDA 
+                              (puede afectar la velocidad).
+    """
+    # Python
+    random.seed(seed)
+    os.environ["PYTHONHASHSEED"] = str(seed)
+    
+    # NumPy
+    np.random.seed(seed)
+    
+    # PyTorch (CPU y GPU)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)  # Para multi-GPU
+    
+    if deterministic:
+        # Hace que las operaciones de PyTorch sean deterministas
+        torch.backends.cudnn.deterministic = True
+        torch.backends.cudnn.benchmark = False
+    else:
+        # Permite a cuDNN seleccionar algoritmos más rápidos pero no reproducibles
+        torch.backends.cudnn.deterministic = False
+        torch.backends.cudnn.benchmark = True
+    
+    print(f"[INFO] Semilla fijada en {seed} (deterministic={deterministic})")
+
+def compute_class_weights(labels):
+    labels = torch.tensor(labels)
+    num_classes = 4
+    class_counts = torch.bincount(labels, minlength=num_classes)
+
+    weights = 1.0 / (class_counts.float() + 1e-8)
+    weights = weights / weights.sum() * num_classes
+    
+    return weights.to(dtype=torch.float, device=device)
 
 def run_epoch(model, dataloader, device, accelerator, 
               loss_BCE, optimizer=None,
@@ -82,7 +125,7 @@ def run_epoch(model, dataloader, device, accelerator,
     
         # --- Cálculo de pérdidas ---
         loss = loss_BCE(wsi_prediction, y_onehot)
-        loss_pe_pc = loss_restrictions(wsi_proportions, alpha_pe= 0.1, alpha_pc=0.1)
+        loss_pe_pc = loss_restrictions(wsi_proportions, args.alpha_pe, args.alpha_pc)
         total_loss = loss + loss_pe_pc
 
         # --- Backpropagation ---
