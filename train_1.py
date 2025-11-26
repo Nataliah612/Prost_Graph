@@ -64,7 +64,7 @@ for lr, batch, epochs in itertools.product(LEARNING_RATES, BATCH_SIZES, EPOCHS_R
     
     # Loading Data
     print("Preparing DataSet SICAP ...")
-    os.makedirs(os.path.dirname(paths['output_file']), exist_ok=True)
+    os.makedirs(os.path.join(BASE_PATH, name), exist_ok=True)
     with open(paths['output_file'], "w") as f:
             f.write(f"Creating Dataset SICAP \n")
     df_train = create_file_label_df(paths["sicap_embeddings"], paths["sicap_data_path"], NAME = 'SICAP')
