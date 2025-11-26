@@ -7,7 +7,6 @@ from torch.optim.lr_scheduler import ReduceLROnPlateau
 from sklearn.model_selection import train_test_split
 
 import os
-import itertools
 import gc
 import time 
 import argparse
@@ -81,11 +80,11 @@ model = get_keep_ia3_model().to(device)
 model = torch.nn.SyncBatchNorm.convert_sync_batchnorm(model)
 
 # =================== LOADING DATA ===================
-print("Preparing DataSet SICAP ...")
+print("Preparing DataSet PANDA ...")
 
 with open(paths['output_file'], "w") as f:
-        f.write(f"Creating Dataset SICAP \n")
-df_train = create_file_label_df(args.data_sicap_patches, args.data_sicap_path, NAME = 'SICAP')
+        f.write(f"Creating Dataset PANDA \n")
+df_train = create_file_label_df(args.data_panda_patches, args.data_panda_path, NAME = 'PANDA')
 
 label_mapping = {0: 0, 1: 0, 2: 0, 3: 1, 4: 2, 5: 3}
 df_train['gleason_primary_mapped'] = df_train['gleason_primary'].map(label_mapping)

@@ -365,6 +365,7 @@ def compute_multilabel_metrics(y_true_onehot, y_prob):
 
     # Predicciones binarias aplicando umbral 0.5
     y_pred = (y_prob >= 0.5).astype(int)
+    #y_pred = torch.topk(y_prob, k=2)
 
     metrics = {}
 

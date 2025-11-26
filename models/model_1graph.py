@@ -44,7 +44,7 @@ def get_keep_ia3_model():
         model_name,
         trust_remote_code=True,             # Ejecuta el codio en remoto
         quantization_config=bnb_config,     # Introduce la configuracion de carga del modelo
-        force_download=True,                # Descarga del modelo 
+        #force_download=True,                # Descarga del modelo 
         low_cpu_mem_usage = True            # Reduce memoria en la carga
     )
         
