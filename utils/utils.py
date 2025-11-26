@@ -18,6 +18,7 @@ def _to_numpy(x):
     if isinstance(x, torch.Tensor):
         x = x.detach().cpu().numpy()
     return x
+
 def set_multiple_seed(seed: int = 42, deterministic: bool = True):
     """
     Fija las semillas para reproducibilidad en Python, NumPy y PyTorch.

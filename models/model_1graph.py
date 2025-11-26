@@ -63,12 +63,14 @@ def get_keep_ia3_model():
             target_modules.append(name)
 
     ia3_config = IA3Config(
+        perf_type='IA3',
         target_modules=target_modules,
         feedforward_modules=target_modules,
-        task_type="FEATURE_EXTRACTION"
+        task_type="FEATURE_EXTRACTION" #SEQ_CLS
     )
 
     ia3_model = get_peft_model(model, ia3_config)
+    ia3_model.print_trainable_parameters()
    
     model = torch.compile(model) # Activar torch.compile si usas PyTorch 2.0+
     # Congelar TODO menos IA3
