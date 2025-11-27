@@ -107,7 +107,7 @@ class RAM_WSI_Dataset(Dataset):
             with h5py.File(features_path, "r", swmr=True) as h5_file:
                 imgs = h5_file["imgs"][:]  # numpy array [num_imgs, H, W, C]
 
-            imgs_tensor = torch.stack([self.transform(Image.fromarray(img)) for img in imgs])
+            imgs_tensor = torch.stack([self.transform(Image.fromarray(img).convert('RGB')) for img in imgs])
             self.images.append(imgs_tensor)
 
         # Mapeo índice original → posición en listas cargadas

@@ -29,24 +29,113 @@ def weights_init(m):
         nn.init.xavier_uniform_(m.weight)
         if m.bias is not None:
             nn.init.zeros_(m.bias)
+from transformers import PretrainedConfig, PreTrainedModel, BertModel, AutoConfig, AutoModel, BertConfig, AutoTokenizer
+import timm
+import torch.nn as nn
+import torch
+import numpy
+from torchvision import transforms
+from PIL import Image
 
-def get_keep_ia3_model():
+
+
+class KEEPConfig(PretrainedConfig):
+    model_type = "keep"  # 
+
+    def __init__(
+        self,
+        vision_config=None,  # Vision Encoder
+        text_config=None,    # Text Encoder
+        projection_dim=768,  
+        **kwargs,
+    ):
+        super().__init__(**kwargs)
+        self.vision_config = vision_config
+        self.text_config = text_config
+        self.projection_dim = projection_dim
+        
+
+class KEEPModel(PreTrainedModel):
+    config_class = KEEPConfig  # 
+
+    def __init__(self, config):
+        super().__init__(config)
+
+        # Vision Encoder 
+        self.visual = timm.create_model(
+            "vit_large_patch16_224",
+            pretrained=False,
+            img_size=224,
+            patch_size=16,
+            init_values=1e-5,
+            num_classes=0,
+            dynamic_img_size=True,
+        )
+
+        self.visual_head = nn.Sequential(
+                    nn.Linear(self.visual.num_features, config.projection_dim),
+                    nn.GELU(),
+                    nn.Linear(config.projection_dim, config.projection_dim)
+                )
+
+        # Text Encoder
+        text_config =  BertConfig(**config.text_config)
+        self.text = BertModel(text_config)
+        
+        self.logit_scale = nn.Parameter(torch.ones([]) * numpy.log(1 / 0.04))
+
+    def encode_image(self, image_inputs):
+        vision_features = self.visual(image_inputs)  # [batch_size, vision_dim]
+        vision_features =  torch.nn.functional.normalize(self.visual_head(vision_features), dim=-1)  # [batch_size, projection_dim]
+        
+        return vision_features
+    
+    def encode_text(self, text_inputs):
+        text_features = torch.nn.functional.normalize(self.text(**text_inputs).pooler_output, dim=-1)  # [batch_size, text_dim]
+        return text_features
+    
+    
+    def forward(self, image_inputs, text_inputs):
+        vision_features = self.encode_image(image_inputs)
+        
+        text_features = self.encode_text(text_inputs)
+
+        return {
+            "vision_features": vision_features,  
+            "text_features": text_features       
+        }
+
+def get_keep_ia3_model(model_path = '/workspace/results/model_keep/' , checkpoint_path= '/workspace/results/model_keep/pytorch_model.bin'):
     model_name = "Astaxanthin/KEEP" # Modelo preentrenado 
 
+    AutoConfig.register("keep", KEEPConfig)
+    AutoModel.register(KEEPConfig, KEEPModel)
+    
     bnb_config = BitsAndBytesConfig(
         load_in_4bit=True,                      # Modelo cuantificado en 4 bits 
         bnb_4bit_compute_dtype=torch.float16,   # Float16 para maentener la velocidad y precision 
         bnb_4bit_use_double_quant=True,         # Usa doble cuanticicacion
         bnb_4bit_quant_type="nf4",              # Variante de tipo de cuqntificacion de 4 bits 
     )
+
+    config = AutoConfig.from_pretrained(model_path + 'config.json',
+                                        trust_remote_code=True,             # Ejecuta el codio en remoto
+                                        quantization_config=bnb_config,     # Introduce la configuracion de carga del modelo
+                                        #force_download=True,                # Descarga del modelo 
+                                        low_cpu_mem_usage = True            # Reduce memoria en la carga
+    )
+    model = AutoModel.from_config(config)
+    state_dict = torch.load(checkpoint_path, map_location='cpu')
+    model.load_state_dict(state_dict, strict=True)
+
    
-    model = AutoModel.from_pretrained( # Carga el modelo 
+    '''model = AutoModel.from_pretrained( # Carga el modelo 
         model_name,
         trust_remote_code=True,             # Ejecuta el codio en remoto
         quantization_config=bnb_config,     # Introduce la configuracion de carga del modelo
         #force_download=True,                # Descarga del modelo 
         low_cpu_mem_usage = True            # Reduce memoria en la carga
-    )
+    )'''
         
     # Activar gradient checkpointing para reducir VRAM
     if hasattr(model, "gradient_checkpointing"):
@@ -58,7 +147,7 @@ def get_keep_ia3_model():
     target_modules = []
     for name, module in model.named_modules():
         if isinstance(module, nn.Linear) and any(
-            key in name for key in ["attn.qkv", "attn.proj", "mlp.fc1", "mlp.fc2"]#, "mlp.fc2"]
+            key in name for key in ["attn.qkv", "attn.proj"]#, "mlp.fc1", "mlp.fc2"]
         ):
             target_modules.append(name)
 
@@ -74,8 +163,8 @@ def get_keep_ia3_model():
     model = torch.compile(model) # Activar torch.compile si usas PyTorch 2.0+
     # Congelar TODO menos IA3
     for name, param in ia3_model.named_parameters():
-        #if "fc1.ia3" not in name :
-        if "blocks.23.mlp.fc1.ia3" not in name and "blocks.22.mlp.fc1.ia3" not in name and "blocks.21.mlp.fc1.ia3" not in name :
+        if ".ia3" not in name :
+        #if "blocks.23.mlp.fc1.ia3" not in name and "blocks.22.mlp.fc1.ia3" not in name and "blocks.21.mlp.fc1.ia3" not in name :
             param.requires_grad = False
     # 7. Envolver con tu modelo final
     net = KEEPForGleason(ia3_model, model_graph)
@@ -130,7 +219,7 @@ class gat(torch.nn.Module):
          # Debe aceptar batch
         self.Aggr = Aggregate_Attnt(L=256, I=1)
         #self.Aggr.apply(weights_init)
-        self.fc = mlp(in_dim=64, out_dim=4)
+        self.classifier = mlp(in_dim=64, out_dim=4)
 
     def forward(self, graph_list):
         
@@ -149,14 +238,14 @@ class gat(torch.nn.Module):
         z2 = F.relu(z2)
 
         # 3) Clasificador por patch
-        logits = self.fc(z2)
+        logits = self.classifier(z2)
         probs = torch.softmax(logits, dim=1)
 
         # 4) MIL aggregation por WSI usando batch_idx   
-        w2 = self.Aggr(z1, batch_idx)
+        w = self.Aggr(z1, batch_idx)
         
         # 5) Weighted max per WSI
-        weighted = w2 * probs             # (N_total, 4)
+        weighted = w * probs             # (N_total, 4)
 
         # 6) Reconstruir patch predictions por WSI
         patch_output = torch.split(probs, lengths.tolist(), dim=0)
