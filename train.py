@@ -1,255 +1,198 @@
-import os
-import itertools
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 import torch.optim as optim
-import pandas as pd
-from sklearn.model_selection import train_test_split
-from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, cohen_kappa_score
 from torch.utils.data import DataLoader
+
+from sklearn.model_selection import train_test_split
+
+import os
 import gc
-from tqdm import tqdm
-from torch.optim.lr_scheduler import ReduceLROnPlateau
+import time 
+import argparse
+
+from accelerate import Accelerator
 
 # =============== IMPORT FUNCIONES ======================
-from models.model_1graph import model_gat, device, weights_init
-from utils.data_load import create_file_label_df, CustomDataset,RandomDataset, collate_fn
-from utils.utils import FocalLoss, compute_class_weights, compute_metrics
-
+from models.model_1graph import get_keep_ia3_model
+from utils.data_load import create_file_label_df, RAM_WSI_Dataset, collate_fn
+from utils.utils import run_epoch, compute_class_weights, set_multiple_seed
 
 os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "max_split_size_mb:128"
 gc.collect()
 
-# =================== CONFIGURACIÓN ===================
-BASE_PATH = "/workspace/results"
-MODEL_TYPE = 3
-LEARNING_RATES = [5e-4, 1e-5, 1e-6,1e-4]
-EPOCHS_RANGE = [100]
-BATCH_SIZES = [ 64, 128, 32]
-PATIENCE = 10
-RANDOM_SEED = 98
+def parse_args():
+    parser = argparse.ArgumentParser(description="Entrenamiento MIL + Patch Classifier")
 
-# =================== Accelerate ===================
+    parser.add_argument("--data_panda_patches", type=str, default='/workspace/data/pandas/patches', help="Ruta de carpeta con imágenes WSI de Panda en .h5 (Dentro deben contener parches)")
+    parser.add_argument("--data_panda_path", type=str, default='/workspace/data/datos_PANDAS.xlsx', help="Ruta del archivo Excel con etiquetas de las WSI de Panda asociadas a la ruta del .h5")
+    parser.add_argument("--data_sicap_patches", type=str, default='/workspace/data/features_SICAP/patches', help="Ruta de carpeta con imágenes WSI de SICAP en .h5 (Dentro deben contener parches)")
+    parser.add_argument("--data_sicap_path", type=str, default='/workspace/data/wsi_labels_changed_SICAP.xlsx', help="Ruta del archivo Excel con etiquetas de las WSI de SICAP asociadas a la ruta del .h5")
 
-print(f"✅ Usando dispositivo: {device}")
-#torch.to.empty_cache()
+    parser.add_argument("--inference",action="store_true",default=False, help="Usar una BBDD para hacer inferencia despues del entrenamiento.")
 
+    parser.add_argument("--results_path", type=str, default='/workspace/results', help="Ruta donde se guardaran los resultados")
 
+    parser.add_argument("--batch_size", type=int, default=4, help="Tamaño de batch")
+    parser.add_argument("--learning_rate", type=float, default=1e-4, help="Learning rate")
+    parser.add_argument("--weight_decay", type=float, default=1e-5, help="Weight decay")
+    parser.add_argument("--momentum", type=float, default=0.9, help="Momentum")
+    parser.add_argument("--epochs", type=int, default=20, help="Número de épocas")
+    parser.add_argument("--patience", type=int, default=20, help="Paciencia para early stopping")
 
-# =================== FUNCIONES AUXILIARES ===================
-def load_model(type_id, name):
-    model_map = {3: (model_gat, name)}
-    model_fn, path = model_map.get(type_id, (model_gat, 'other'))
-    model = model_fn()
-    model = torch.nn.SyncBatchNorm.convert_sync_batchnorm(model)
-    model = model.to(device)
+    parser.add_argument("--seed", type=int, default=98, help="Semilla aleatoria")
+    parser.add_argument("--num_workers", type=int, default=2, help="Numero de paralelizaciones")
 
-    os.makedirs(os.path.join(BASE_PATH, path), exist_ok= True)
-    paths = {
-        'output_file': os.path.join(BASE_PATH, path, 'output.txt'),
-        'plot_kfold_path': os.path.join(BASE_PATH, path, 'k_fold_plot.png'),
-        'results_sicap': os.path.join(BASE_PATH, path),
-        'results_path': os.path.join(BASE_PATH, path, 'result_mdl.xlsx'),
-        'model_path': os.path.join(BASE_PATH, path, 'best_model.pth'),
-        'embedding_path':  '/workspace/data/pandas/embeddings/KEEP',
-        'data_path':  '/workspace/data/datos_PANDAS.xlsx',
-        'sicap_path_embeddings': '/workspace/data/features_SICAP/embeddings/KEEP',
-        'excel_path_sicap': '/workspace/data/wsi_labels_changed.xlsx',
-    }
+    parser.add_argument("--alpha_pe", default=0.01, type=float)
+    parser.add_argument("--alpha_pc", default=0.01, type=float)
 
-    return model, paths
+    return parser.parse_args()
 
+# =================== GENERAL CONFIGURACION ===================
 
+use_amp = torch.cuda.is_available()  # mixed precision if GPU available
+args = parse_args()
 
+# Multi-GPU accelerator init
+accelerator = Accelerator()
+device = accelerator.device
+print(f"Usando dispositivo: {device}", flush = True)
+torch.cuda.empty_cache()
 
-def train_and_evaluate(model, model_id, model_path, params, paths):
+set_multiple_seed(args.seed)
+
+# =================== PATHS DEFINITION ===================
+name = f"try_{args.learning_rate}_{args.batch_size}_{args.epochs}"
+
+results_path = os.path.join(args.results_path, name)
+os.makedirs(results_path, exist_ok=True)
+
+paths = {   'output_file': os.path.join(results_path, 'output.txt'),
+            'plot_kfold_path': os.path.join(results_path, 'k_fold_plot.png'),
+            'results_sicap': os.path.join(results_path),
+            'results_path': os.path.join(results_path, 'result_mdl.xlsx'),
+            'model_path': os.path.join(results_path, 'best_model.pth')}
+
+# =================== PMODEL CONFIGURATION ===================
+model = get_keep_ia3_model().to(device)
+model = torch.nn.SyncBatchNorm.convert_sync_batchnorm(model)
+
+# =================== LOADING DATA ===================
+print("Preparing DataSet PANDA ...")
+
+with open(paths['output_file'], "w") as f:
+        f.write(f"Creating Dataset PANDA \n")
+df_train = create_file_label_df(args.data_panda_patches, args.data_panda_path, NAME = 'PANDA')
+
+label_mapping = {0: 0, 1: 0, 2: 0, 3: 1, 4: 2, 5: 3}
+df_train['gleason_primary_mapped'] = df_train['gleason_primary'].map(label_mapping)
+df_train['gleason_secondary_mapped'] = df_train['gleason_secondary'].map(label_mapping)
+df_train['gleason_score'] = df_train['gleason_score'].astype(int)
+
+# =================== DATA SPLIT ===================
+train_val_idx, test_idx = train_test_split(df_train.index, test_size=0.15, stratify=df_train["gleason_score"])
+train_idx, val_idx = train_test_split(train_val_idx, test_size=0.10, stratify=df_train.loc[train_val_idx]["gleason_score"])
+
+# =================== DATALOADERS ===================
+dl_kwargs = {"batch_size": args.batch_size, "collate_fn": collate_fn, "num_workers": args.num_workers}
+if torch.cuda.is_available():
+    dl_kwargs["pin_memory"] = True
+
+inicio__load = time.time() 
+print("Loading embeddings for Training ...")
+train_loader = DataLoader(RAM_WSI_Dataset(df_train, train_idx), shuffle=True, **dl_kwargs)
+print("Loading embeddings for Validation ...")
+val_loader = DataLoader(RAM_WSI_Dataset(df_train, val_idx), shuffle=False, **dl_kwargs)
+print("Loading embeddings for Test ...")
+test_loader = DataLoader(RAM_WSI_Dataset(df_train, test_idx), shuffle=False, **dl_kwargs)
+fin__load = time.time()
+
+time_load = fin__load - inicio__load
+
+with open(paths['output_file'], "a") as f:
+    f.write(f"Time for loading data : {time_load} \n")
+
+# =================== WEIGHTS CALCUALTION ===================
+primary_weights = compute_class_weights(df_train['gleason_primary_mapped'])
+secondary_weights = compute_class_weights(df_train['gleason_secondary_mapped'])
+sum_weights = primary_weights + secondary_weights
+
+# =================== TRAINING PARAMETHERS ===================
+loss = nn.BCEWithLogitsLoss(pos_weight=sum_weights) 
+
+optimizer = optim.SGD(model.parameters(), lr=args.learning_rate, weight_decay=args.weight_decay, momentum=args.momentum) # Adam -> SGD
+scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=3, gamma=0.7)
+
+model, optimizer, train_loader, val_loader, test_loader, scheduler = accelerator.prepare(
+        model, optimizer, train_loader, val_loader, test_loader, scheduler )
+
+best_loss = float("inf")
+no_improve = 0
+
+# =================== TRAINING ===================
+for epoch in range(args.epochs):
+    print(f"\nEpoch {epoch}")
+    with open(paths['output_file'], "a") as f:
+        f.write(f"\nEpoch {epoch}\n")
     
-    print("Preparing Data ...")
+    # TRAIN
+    train_metrics, train_loss = run_epoch(model, train_loader, device, accelerator, loss, optimizer, mode='train', args=args)
 
-    label_mapping = {0: 0, 3: 1, 4: 2, 5: 3}
+    # VALIDATION
+    val_metrics, val_loss = run_epoch(model, val_loader, device, accelerator, loss, optimizer, mode = 'val',args=args)
+    
+    scheduler.step(val_loss)
+    
+    #  Early Stopping / Checkpoint
+    accelerator.wait_for_everyone()
+    if val_loss < best_loss:
+        best_loss, no_improve = val_loss, 0
+        if accelerator.is_main_process:
+            accelerator.save_model(model, paths['model_path'])
+            print(f"Mejor modelo guardado en {paths['model_path']} con val_loss: {best_loss:.4f}", flush=True)
+    else:
+        no_improve += 1
+        if no_improve >= args.patience:
+            print('Early stopping activado - Entrenamiento finalizado ', flush=True)
+            break
 
-    df_train = create_file_label_df(paths["embedding_path"], paths["data_path"])
+    print(f"Epoch {epoch} | Train Loss: {train_loss:.4f} Acc: {train_metrics['global'][0]:.4f}")
+    print(f"           Val Loss: {val_loss:.4f} Acc_global: {val_metrics['global'][0]:.4f} Kappa_global: {val_metrics['global'][-1]:.4f} | Acc_primary: {val_metrics['primary'][0]:.4f} Kappa_primary: {val_metrics['primary'][-1]:.4f} |Acc_secondary: {val_metrics['secondary'][0]:.4f} Kappa_secondary: {val_metrics['secondary'][-1]:.4f} ")
 
-    train_val_idx, test_idx = train_test_split(
-        df_train.index, test_size=0.2,
-        stratify=df_train["gleason_score"]
-    )
-
-    train_idx, val_idx = train_test_split(
-        train_val_idx, test_size=0.25,
-        stratify=df_train.loc[train_val_idx]["gleason_score"]
-    )
-
-    data_train = RandomDataset(df_train, train_idx, len_subset=2000)
-
-    train_loader = DataLoader(data_train,
-                              batch_size=params["batch"],
-                              shuffle=True,  collate_fn=collate_fn)
-    val_loader   = DataLoader(CustomDataset(df_train, val_idx),
-                              batch_size=params["batch"],
-                              shuffle=False, collate_fn=collate_fn)
-    test_loader = DataLoader(CustomDataset(df_train, test_idx),
-                            batch_size=params["batch"],
-                            shuffle=False, collate_fn=collate_fn)
-
-    # ------------ perdidas y optimizadores ------------------------
-    w_class1  = compute_class_weights(df_train["gleason_primary"])
-    w_class2  = compute_class_weights(df_train["gleason_secondary"])
-
-    loss_fn1  = nn.CrossEntropyLoss(weight= w_class1) #FocalLoss(weight=w_class1, gamma=2.0)
-    loss_fn2  = nn.CrossEntropyLoss(weight= w_class2) #FocalLoss(weight=w_class2, gamma=2.0)
-
-    model.apply(weights_init)
-   
-    optimizer = optim.AdamW(model.parameters(), lr=params["lr"], weight_decay=1e-5) # Optimizador 
-
-    scheduler = ReduceLROnPlateau(
-        optimizer,
-        mode="min",  # porque usamos val_loss (minimizar)
-        factor=0.1,  # reduce LR a un 10% cuando no mejora
-        patience=PATIENCE,  # cuántas épocas esperar sin mejora
-        verbose=True  # imprime cambios de LR
-    )
-
-    best_loss, no_improve = float("inf"), 0
-
-    for epoch in range(params["epochs"]):
-        print(f"\nEpoch {epoch}")
-
-        # TRAINING
-        model.train()
-        train_loss_sum = 0.0
-        train_correct  = torch.zeros(1, dtype=torch.long, device=device)
-        train_seen     = torch.zeros(1, dtype=torch.long, device=device)
-
-        for inputs, y in tqdm(train_loader, desc="Training"):
-            y1 = torch.tensor([label_mapping[i.item()] for i in y[:, 0]], device=device)
-            y2 = torch.tensor([label_mapping[i.item()] for i in y[:, 1]], device=device)
-
-            out1, out2 = model(inputs.to(device),)
-            loss = loss_fn1(out1, y1) + loss_fn2(out2, y2)
-
-            optimizer.zero_grad()
-            loss.backward()
-            optimizer.step()
-
-            batch_sz = inputs.size(0)
-            train_loss_sum += loss.item() * batch_sz
-
-            preds_ok = ((out1.argmax(1) == y1) & (out2.argmax(1) == y2)).sum()
-            train_correct += preds_ok
-            train_seen    += batch_sz
-
-        train_loss    = train_loss_sum / train_seen
-        train_acc     = train_correct / train_seen
-
-        # VALIDATION
-        model.eval()
-        val_loss_sum = 0.0
-        val_correct  = torch.zeros(1, dtype=torch.long, device=device)
-        val_seen     = torch.zeros(1, dtype=torch.long, device=device)
-        all_y1, all_p1, all_y2, all_p2 = [], [], [], []
-        t_y_sum, t_p_sum = [], []
-
-        with torch.no_grad():
-            for inputs, y in tqdm(val_loader, desc="Validation"):
-                y1 = torch.tensor([label_mapping[i.item()] for i in y[:, 0]], device=device)
-                y2 = torch.tensor([label_mapping[i.item()] for i in y[:, 1]], device=device)
-
-                out1, out2 = model(inputs.to(device))
-                loss = loss_fn1(out1, y1) + loss_fn2(out2, y2)
-
-                batch_sz = inputs.size(0)
-                val_loss_sum += loss.item() * batch_sz
-
-                all_y1.append(y1); all_p1.append(out1.argmax(1))
-                all_y2.append(y2); all_p2.append(out2.argmax(1))
-                t_y_sum.append(y1 + y2)
-                t_p_sum.append(out1.argmax(1) + out2.argmax(1))
-
-                preds_ok = ((out1.argmax(1) == y1) & (out2.argmax(1) == y2)).sum()
-                val_correct += preds_ok
-                val_seen    += batch_sz
-
-        val_loss    = val_loss_sum / val_seen
-        val_acc     = val_correct / val_seen
-
-        g_ty_sum = torch.cat(t_y_sum)[:val_seen]
-        g_tp_sum = torch.cat(t_p_sum)[:val_seen]
-        val_kappa = compute_metrics(g_ty_sum, g_tp_sum)[-1] 
-
-        scheduler.step(val_loss)
-
-        # TEST
-        model.eval()
-        test_loss_sum = 0.0
-        test_correct  = torch.zeros(1, dtype=torch.long, device=device)
-        test_seen     = torch.zeros(1, dtype=torch.long, device=device)
-        t_y1, t_p1, t_y2, t_p2 = [], [], [], []
-        t_y_sum, t_p_sum = [], []
-
-        with torch.no_grad():
-            for inputs, y in tqdm(test_loader, desc="Test"):
-                y1 = torch.tensor([label_mapping[i.item()] for i in y[:, 0]], device=device)
-                y2 = torch.tensor([label_mapping[i.item()] for i in y[:, 1]], device=device)
-
-                out1, out2 = model(inputs.to(device))
-                loss = loss_fn1(out1, y1) + loss_fn2(out2, y2)
-
-                batch_sz = inputs.size(0)
-                test_loss_sum += loss.item() * batch_sz
-
-                t_y1.append(y1); t_p1.append(out1.argmax(1))
-                t_y2.append(y2); t_p2.append(out2.argmax(1))
-                t_y_sum.append(y1 + y2)
-                t_p_sum.append(out1.argmax(1) + out2.argmax(1))
-
-                preds_ok = ((out1.argmax(1) == y1) & (out2.argmax(1) == y2)).sum()
-                test_correct += preds_ok
-                test_seen    += batch_sz
-
-
-        test_loss    = test_loss_sum / test_seen
-        test_acc     = test_correct / test_seen
-
-        g_ty_sum = torch.cat(t_y_sum)[:test_seen]
-        g_tp_sum = torch.cat(t_p_sum)[:test_seen]
-        test_kappa = compute_metrics(g_ty_sum, g_tp_sum)[-1] 
-
-        # EARLY-STOP / CHECKPOINT
-        if val_loss < best_loss:
-            torch.save(model.state_dict(), model_path)
-            best_loss, no_improve = val_loss, 0
-           
-        else:
-            no_improve += 1
-            if no_improve >= PATIENCE:
-                break
-
-        print(f"Epoch {epoch} | Train Loss: {train_loss[0]:.4f} Acc: {train_acc[0]:.4f}")
-        print(f"           Val Loss: {val_loss[0]:.4f} Acc: {val_acc[0]:.4f} Kappa: {val_kappa:.4f}")
-        print(f"           Test Loss: {test_loss[0]:.4f} Acc: {test_acc[0]:.4f} Kappa: {test_kappa:.4f}")
+    with open(paths['output_file'], "a") as f: 
+        f.write(f"Epoch {epoch}|    Train Loss: {train_loss:.4f} Acc: {train_metrics['global'][0]:.4f}\n")
+        f.write(f"          Val Loss: {val_loss:.4f} Acc_global: {val_metrics['global'][0]:.4f} Kappa_global: {val_metrics['global'][-1]:.4f} | Acc_primary: {val_metrics['primary'][0]:.4f} Kappa_primary: {val_metrics['primary'][-1]:.4f} |Acc_secondary: {val_metrics['secondary'][0]:.4f} Kappa_secondary: {val_metrics['secondary'][-1]:.4f} ")
         
+# =================== TEST ===================
+test_metrics, test_loss = run_epoch(model, test_loader, device, accelerator, loss, optimizer, mode='test',args=args)   
 
-        with open(paths['output_file'], "a") as f:
-            f.write(f"Epoch {epoch}|    Train Loss: {train_loss[0]:.4f} Acc: {train_acc[0]:.4f}\n"
-                    f"          Val Loss: {val_loss[0]:.4f}         Acc: {val_acc[0]:.4f}    Kappa: {val_kappa:.4f}\n"
-                    f"          Test Loss: {test_loss[0]:.4f}       Acc: {test_acc[0]:.4f}   Kappa: {test_kappa:.4f}\n")
-                    
+print(f"Test Loss: {test_loss:.4f} Acc: {test_metrics[0]:.4f} Kappa: {test_metrics[-1]:.4f}")
+print(f"Test Loss: {test_loss:.4f} Acc_global: {test_metrics['global'][0]:.4f} Kappa_global: {test_metrics['global'][-1]:.4f} | Acc_primary: {test_metrics['primary'][0]:.4f} Kappa_primary: {test_metrics['primary'][-1]:.4f} |Acc_secondary: {test_metrics['secondary'][0]:.4f} Kappa_secondary: {test_metrics['secondary'][-1]:.4f} ")
+with open(paths['output_file'], "a") as f:
+    f.write(f" Test Loss: {test_loss:.4f}  Acc_global: {test_metrics['global'][0]:.4f} Kappa_global: {test_metrics['global'][-1]:.4f} | Acc_primary: {test_metrics['primary'][0]:.4f} Kappa_primary: {test_metrics['primary'][-1]:.4f} |Acc_secondary: {test_metrics['secondary'][0]:.4f} Kappa_secondary: {test_metrics['secondary'][-1]:.4f}\n")
+    f.write(f"Acuracy: {test_metrics[0]}, | Precision: {test_metrics[1]} | Recall : {test_metrics[2]}| F1 Score: {test_metrics[3]}")
+    f.write(f"Métricas : {test_metrics}")
 
-# =============== EJECUCIÓN ===================
-if __name__ == "__main__":
-    for lr, batch, epochs in itertools.product(LEARNING_RATES, BATCH_SIZES, EPOCHS_RANGE):
-        name = f"try_{lr}_{batch}_{epochs}"
-        model, paths = load_model(MODEL_TYPE, name)
+# =================== INFERENCE ===================
+if args.inference == True: 
+        
+    with open(paths['output_file'], "a") as f:
+        f.write(f"Inference in SICAP \n")
+        
+    df_test = create_file_label_df(args.data_sicap_patches, args.data_sicap_path, NAME = 'SICAP')
 
-        with open(paths['output_file'], "w") as f:
-                    f.write(f"Modelo: {name} \n")
-        params = {
-            "batch": batch,
-            "lr": lr,
-            "epochs": epochs
-        }
+    label_mapping = {0: 0, 1: 0, 2: 0, 3: 1, 4: 2, 5: 3}
+    df_test['gleason_primary_mapped'] = df_test['gleason_primary'].map(label_mapping)
+    df_test['gleason_secondary_mapped'] = df_test['gleason_secondary'].map(label_mapping)
+    df_test['gleason_score'] = df_test['gleason_score'].astype(int)
 
-        trained_model = train_and_evaluate(model, MODEL_TYPE, paths["model_path"], params, paths)
+    print("Loading embeddings for Inference ...")
+    inference_loader = DataLoader(RAM_WSI_Dataset(df_test, df_test.index), shuffle=False, **dl_kwargs)
+
+    inference_metrics, inference_loss = run_epoch(model, inference_loader, device, accelerator, loss, optimizer, mode='test',args=args)   
+
+    print(f"Test Loss: {inference_loss:.4f} Acc: {inference_metrics[0]:.4f} Kappa: {inference_metrics[-1]:.4f}")
+    print(f"Test Loss: {inference_loss:.4f} Acc_global: {inference_metrics['global'][0]:.4f} Kappa_global: {inference_metrics['global'][-1]:.4f} | Acc_primary: {inference_metrics['primary'][0]:.4f} Kappa_primary: {inference_metrics['primary'][-1]:.4f} |Acc_secondary: {inference_metrics['secondary'][0]:.4f} Kappa_secondary: {inference_metrics['secondary'][-1]:.4f} ")
+    with open(paths['output_file'], "a") as f:
+        f.write(f" Test Loss: {inference_loss:.4f}  Acc_global: {inference_metrics['global'][0]:.4f} Kappa_global: {inference_metrics['global'][-1]:.4f} | Acc_primary: {inference_metrics['primary'][0]:.4f} Kappa_primary: {inference_metrics['primary'][-1]:.4f} |Acc_secondary: {inference_metrics['secondary'][0]:.4f} Kappa_secondary: {inference_metrics['secondary'][-1]:.4f}\n")
+        f.write(f"Acuracy: {inference_metrics[0]}, | Precision: {inference_metrics[1]} | Recall : {inference_metrics[2]}| F1 Score: {inference_metrics[3]}")
+        f.write(f"Métricas : {inference_metrics}")
