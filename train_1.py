@@ -2,7 +2,6 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import DataLoader
-from torch.optim.lr_scheduler import ReduceLROnPlateau
 
 from sklearn.model_selection import train_test_split
 
@@ -67,13 +66,11 @@ name = f"try_{args.learning_rate}_{args.batch_size}_{args.epochs}"
 results_path = os.path.join(args.results_path, name)
 os.makedirs(results_path, exist_ok=True)
 
-paths = {
-    'output_file': os.path.join(results_path, 'output.txt'),
-    'plot_kfold_path': os.path.join(results_path, 'k_fold_plot.png'),
-    'results_sicap': os.path.join(results_path),
-    'results_path': os.path.join(results_path, 'result_mdl.xlsx'),
-    'model_path': os.path.join(results_path, 'best_model.pth'),
-}
+paths = {   'output_file': os.path.join(results_path, 'output.txt'),
+            'plot_kfold_path': os.path.join(results_path, 'k_fold_plot.png'),
+            'results_sicap': os.path.join(results_path),
+            'results_path': os.path.join(results_path, 'result_mdl.xlsx'),
+            'model_path': os.path.join(results_path, 'best_model.pth')}
 
 # =================== PMODEL CONFIGURATION ===================
 model = get_keep_ia3_model().to(device)

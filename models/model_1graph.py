@@ -9,8 +9,11 @@ from torch_geometric.data import Data
 from torch_geometric.data import Batch
 from torch_geometric.utils import softmax
 
+import timm
+import numpy
+
 import os
-from transformers import AutoModel, BitsAndBytesConfig
+from transformers import BitsAndBytesConfig, PretrainedConfig, PreTrainedModel, BertModel, AutoConfig, AutoModel, BertConfig
 
 from peft import get_peft_model,IA3Config #, LoraConfig
 
@@ -29,15 +32,6 @@ def weights_init(m):
         nn.init.xavier_uniform_(m.weight)
         if m.bias is not None:
             nn.init.zeros_(m.bias)
-from transformers import PretrainedConfig, PreTrainedModel, BertModel, AutoConfig, AutoModel, BertConfig, AutoTokenizer
-import timm
-import torch.nn as nn
-import torch
-import numpy
-from torchvision import transforms
-from PIL import Image
-
-
 
 class KEEPConfig(PretrainedConfig):
     model_type = "keep"  # 
@@ -62,14 +56,13 @@ class KEEPModel(PreTrainedModel):
         super().__init__(config)
 
         # Vision Encoder 
-        self.visual = timm.create_model(
-            "vit_large_patch16_224",
-            pretrained=False,
-            img_size=224,
-            patch_size=16,
-            init_values=1e-5,
-            num_classes=0,
-            dynamic_img_size=True,
+        self.visual = timm.create_model("vit_large_patch16_224",
+                                        pretrained=False,
+                                        img_size=224,
+                                        patch_size=16,
+                                        init_values=1e-5,
+                                        num_classes=0,
+                                        dynamic_img_size=True,
         )
 
         self.visual_head = nn.Sequential(
