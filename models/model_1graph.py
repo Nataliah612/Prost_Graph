@@ -151,14 +151,16 @@ def get_keep_ia3_model(model_path = '/workspace/data/model_keep/' , checkpoint_p
     )
 
     ia3_model = get_peft_model(model, ia3_config)
-    ia3_model.print_trainable_parameters()
+    
    
     model = torch.compile(model) # Activar torch.compile si usas PyTorch 2.0+
     # Congelar TODO menos IA3
     for name, param in ia3_model.named_parameters():
-        if ".ia3" not in name :
+        #if ".ia3" not in name and '.2' not in name:
         #if "blocks.23.mlp.fc1.ia3" not in name and "blocks.22.mlp.fc1.ia3" not in name and "blocks.21.mlp.fc1.ia3" not in name :
             param.requires_grad = False
+    ia3_model.print_trainable_parameters()
+
     # 7. Envolver con tu modelo final
     net = KEEPForGleason(ia3_model, model_graph)
     return net
@@ -242,10 +244,14 @@ class gat(torch.nn.Module):
 
         # 6) Reconstruir patch predictions por WSI
         patch_output = torch.split(probs, lengths.tolist(), dim=0)
-        out_wsi = [torch.sum(weighted,dim=0) for p in patch_output]
-        #out_wsi = [torch.max(weighted,dim=0)[0] for p in patch_output]
+        weight_output = torch.split(weighted, lengths.tolist(), dim=0)
 
-        return torch.stack(out_wsi), patch_output
+        #out_wsi = [torch.sum(p,dim=0) for p in weight_output]
+        #out_wsi = [torch.max(weighted,dim=0)[0] for p in patch_output]
+        idx = torch.repeat_interleave(torch.arange(len(lengths), device=weighted.device), lengths)
+        out_wsi = torch.zeros(len(lengths), weighted.size(1), device=weighted.device).index_add_(0, idx, weighted)
+
+        return out_wsi, patch_output
 
 class Aggregate_Attnt(nn.Module):
     def __init__(self, L=512, I=1):
@@ -275,6 +281,7 @@ class mlp(nn.Module):
         x = F.relu(x)
         x = self.dropout(x)
         x = self.fc(x)
+        
         return x
 
 '''from transformers import AutoModel, BitsAndBytesConfig

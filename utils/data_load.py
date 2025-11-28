@@ -14,13 +14,13 @@ import gc
 from tqdm import tqdm
 import sys
 
-def create_file_label_df(images_path, data_path, NAME='', slide_col='image_id'):
+def create_file_label_df(images_path, data_path, NAME='',small_dataset=False ,slide_col='image_id'):
     patch_list,patient_list  = [], []
     gleason_score = []
     gleason_primary_list,gleason_secondary_list  = [], []
     df = pd.read_excel(data_path)
     
-    #df = df.head(100)
+    df = df.head(200) if small_dataset == True else df
 
     wsis = [f for f in os.listdir(images_path) if f.endswith('.h5')]
     for f in tqdm(wsis, desc="Procesando WSIs", file=sys.stdout):

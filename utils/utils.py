@@ -6,6 +6,7 @@ import random
 from tqdm import tqdm 
 import sys 
 import math
+import csv
 
 from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, cohen_kappa_score, average_precision_score, roc_auc_score
 
@@ -405,3 +406,126 @@ def compute_multilabel_metrics(y_true_onehot, y_prob):
     )
 
     return metrics
+
+
+def log_epoch_metrics(epoch, split_name, metrics, loss, output_path):
+    """
+    Imprime y guarda métricas ordenadas para cada época, incluyendo la pérdida.
+
+    Args:
+        epoch (int): Número de época.
+        split_name (str): "Train", "Val" o "Test".
+        metrics (dict): Diccionario con claves 'primary', 'secondary', 'global'.
+        loss (float): Pérdida promedio de la época.
+        output_path (str): Ruta del archivo donde guardar.
+    """
+    log_str = []
+    log_str.append(f"\n=== Época {epoch} | {split_name.upper()} METRICS ===")
+    log_str.append(f"Loss global: {loss:.4f}")
+
+    for key in ["primary", "secondary", "global"]:
+        m = metrics[key]
+        log_str.append(f"\n-- {key.upper()} --")
+        log_str.append(f"  Accuracy : {m['accuracy']:.4f}")
+        log_str.append(f"  Precision: {m['precision']:.4f}")
+        log_str.append(f"  Recall   : {m['recall']:.4f}")
+        log_str.append(f"  F1 Score : {m['f1']:.4f}")
+        log_str.append(f"  Kappa    : {m['kappa']:.4f}")
+
+     # Añadir sección para métricas multilabel si están presentes
+    if "multilabel" in metrics:
+        m_ml = metrics["multilabel"]
+        log_str.append(f"\n-- MULTILABEL --")
+        log_str.append(f"  Subset Accuracy : {m_ml['subset_accuracy']:.4f}")
+        log_str.append(f"  Precision (Micro): {m_ml['precision_micro']:.4f}")
+        log_str.append(f"  Recall (Micro)   : {m_ml['recall_micro']:.4f}")
+        log_str.append(f"  F1 Score (Micro) : {m_ml['f1_micro']:.4f}")
+        log_str.append(f"  Precision (Macro): {m_ml['precision_macro']:.4f}")
+        log_str.append(f"  Recall (Macro)   : {m_ml['recall_macro']:.4f}")
+        log_str.append(f"  F1 Score (Macro) : {m_ml['f1_macro']:.4f}")
+        log_str.append(f"  AUROC (Macro)    : {m_ml['auroc_macro']:.4f}")
+        log_str.append(f"  AUPRC (Macro)    : {m_ml['auprc_macro']:.4f}")
+
+    # =======================
+    #  Imprimir en consola
+    # =======================
+    print("\n".join(log_str), flush=True)
+
+    # =======================
+    #  Guardar en archivo
+    # =======================
+    with open(output_path, "a") as f:
+        f.write("\n".join(log_str) + "\n")
+
+
+def save_metrics_to_csv(metrics: dict, epoch: int, filepath: str = "metrics.csv"):
+    """
+    Guarda las métricas de cada época como una fila en un CSV.
+
+    Args:
+        metrics (dict): Diccionario con métricas en las keys "primary", "secondary", "global" y "multilabel".
+        epoch (int): Número de la época actual.
+        filepath (str): Ruta del archivo CSV.
+    """
+
+    # Definir el orden de las columnas
+    fieldnames = [
+        "epoch",
+        "primary_accuracy", "primary_precision", "primary_recall", "primary_f1", "primary_kappa", 
+        "secondary_accuracy", "secondary_precision", "secondary_recall", "secondary_f1", "secondary_kappa",
+        "global_accuracy", "global_precision", "global_recall", "global_f1", "global_kappa"
+    ]
+
+    # Añadir columnas para métricas multilabel si están presentes
+    if "multilabel" in metrics:
+        fieldnames.extend([
+            "multilabel_subset_accuracy",
+            "multilabel_precision_micro", "multilabel_recall_micro", "multilabel_f1_micro",
+            "multilabel_precision_macro", "multilabel_recall_macro", "multilabel_f1_macro",
+            "multilabel_auroc_macro", "multilabel_auprc_macro"
+        ])
+
+    # Aplanar el diccionario en una fila
+    row = {
+        "epoch": epoch,
+        "primary_accuracy": metrics["primary"]["accuracy"],
+        "primary_precision": metrics["primary"]["precision"],
+        "primary_recall": metrics["primary"]["recall"],
+        "primary_f1": metrics["primary"]["f1"],
+        "primary_kappa": metrics["primary"]["kappa"],
+      
+        "secondary_accuracy": metrics["secondary"]["accuracy"],
+        "secondary_precision": metrics["secondary"]["precision"],
+        "secondary_recall": metrics["secondary"]["recall"],
+        "secondary_f1": metrics["secondary"]["f1"],
+        "secondary_kappa": metrics["secondary"]["kappa"],
+
+        "global_accuracy": metrics["global"]["accuracy"],
+        "global_precision": metrics["global"]["precision"],
+        "global_recall": metrics["global"]["recall"],
+        "global_f1": metrics["global"]["f1"],
+        "global_kappa": metrics["global"]["kappa"],
+    }
+
+    # Añadir valores para métricas multilabel si están presentes
+    if "multilabel" in metrics:
+        m_ml = metrics["multilabel"]
+        row.update({
+            "multilabel_subset_accuracy": m_ml["subset_accuracy"],
+            "multilabel_precision_micro": m_ml["precision_micro"],
+            "multilabel_recall_micro": m_ml["recall_micro"],
+            "multilabel_f1_micro": m_ml["f1_micro"],
+            "multilabel_precision_macro": m_ml["precision_macro"],
+            "multilabel_recall_macro": m_ml["recall_macro"],
+            "multilabel_f1_macro": m_ml["f1_macro"],
+            "multilabel_auroc_macro": m_ml["auroc_macro"],
+            "multilabel_auprc_macro": m_ml["auprc_macro"]
+        })
+
+    # Crear el archivo si no existe y escribir cabecera
+    file_exists = os.path.isfile(filepath)
+    with open(filepath, mode="a", newline="") as csvfile:
+        writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+        if not file_exists:
+            writer.writeheader()
+        writer.writerow(row)

@@ -15,7 +15,7 @@ from accelerate import Accelerator
 # =============== IMPORT FUNCIONES ======================
 from models.model_1graph import get_keep_ia3_model
 from utils.data_load import create_file_label_df, RAM_WSI_Dataset, collate_fn
-from utils.utils import run_epoch, compute_class_weights, set_multiple_seed
+from utils.utils import run_epoch, compute_class_weights, set_multiple_seed, log_epoch_metrics, save_metrics_to_csv
 
 os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "max_split_size_mb:128"
 gc.collect()
@@ -29,6 +29,7 @@ def parse_args():
     parser.add_argument("--data_sicap_path", type=str, default='/workspace/data/wsi_labels_changed_SICAP.xlsx', help="Ruta del archivo Excel con etiquetas de las WSI de SICAP asociadas a la ruta del .h5")
 
     parser.add_argument("--inference",action="store_true",default=False, help="Usar una BBDD para hacer inferencia despues del entrenamiento.")
+    parser.add_argument("--small_dataset",action="store_true",default=False, help="Usar un subset de la BBDD para el entrenamiento.")
 
     parser.add_argument("--results_path", type=str, default='/workspace/results', help="Ruta donde se guardaran los resultados")
 
@@ -48,10 +49,10 @@ def parse_args():
     return parser.parse_args()
 
 # =================== GENERAL CONFIGURACION ===================
-
+CUDA_LAUNCH_BLOCKING=1
 use_amp = torch.cuda.is_available()  # mixed precision if GPU available
 args = parse_args()
-
+args.small_dataset = True
 # Multi-GPU accelerator init
 accelerator = Accelerator()
 device = accelerator.device
@@ -69,8 +70,10 @@ os.makedirs(results_path, exist_ok=True)
 paths = {   'output_file': os.path.join(results_path, 'output.txt'),
             'plot_kfold_path': os.path.join(results_path, 'k_fold_plot.png'),
             'results_sicap': os.path.join(results_path),
-            'results_path': os.path.join(results_path, 'result_mdl.xlsx'),
-            'model_path': os.path.join(results_path, 'best_model.pth')}
+           
+            'result_best_model_path':os.path.join(results_path, 'best_model'),
+            'result_last_model_path': os.path.join(results_path, 'last_model'),
+            'log_output_path':os.path.join(results_path, 'train_log_output.txt')}
 
 # =================== PMODEL CONFIGURATION ===================
 model = get_keep_ia3_model().to(device)
@@ -80,8 +83,8 @@ model = torch.nn.SyncBatchNorm.convert_sync_batchnorm(model)
 print("Preparing DataSet PANDA ...")
 
 with open(paths['output_file'], "w") as f:
-        f.write(f"Creating Dataset PANDA \n")
-df_train = create_file_label_df(args.data_panda_patches, args.data_panda_path, NAME = 'PANDA')
+        f.write(f"Creating Dataset SICAP \n")
+df_train = create_file_label_df(args.data_panda_patches, args.data_panda_path,small_dataset= args.small_dataset, NAME = 'PANDA')
 
 label_mapping = {0: 0, 1: 0, 2: 0, 3: 1, 4: 2, 5: 3}
 df_train['gleason_primary_mapped'] = df_train['gleason_primary'].map(label_mapping)
@@ -117,7 +120,7 @@ secondary_weights = compute_class_weights(df_train['gleason_secondary_mapped'])
 sum_weights = primary_weights + secondary_weights
 
 # =================== TRAINING PARAMETHERS ===================
-loss = nn.BCEWithLogitsLoss(pos_weight=sum_weights) 
+loss = nn.BCELoss(weight=sum_weights) #WithLogitsLoss(pos_weight=sum_weights) 
 
 optimizer = optim.SGD(model.parameters(), lr=args.learning_rate, weight_decay=args.weight_decay, momentum=args.momentum) # Adam -> SGD
 scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=3, gamma=0.7)
@@ -139,33 +142,45 @@ for epoch in range(args.epochs):
 
     # VALIDATION
     val_metrics, val_loss = run_epoch(model, val_loader, device, accelerator, loss, optimizer, mode = 'val',args=args)
-    
+    if accelerator.is_main_process:
+        log_epoch_metrics(epoch, "Validation", val_metrics, val_loss, paths['log_output_path'])
+        save_metrics_to_csv(val_metrics, epoch=epoch,  filepath= os.path.join(paths['run_results_path'], "train_validation_metrics.csv"))
+        
     scheduler.step(val_loss)
     
     #  Early Stopping / Checkpoint
     accelerator.wait_for_everyone()
-    if val_loss < best_loss:
-        best_loss, no_improve = val_loss, 0
+    if val_loss < best_validation_loss:
+        best_validation_loss, no_improve = val_loss, 0
+        accelerator.save_state(paths['result_best_model_path'])
         if accelerator.is_main_process:
-            accelerator.save_model(model, paths['model_path'])
-            print(f"Mejor modelo guardado en {paths['model_path']} con val_loss: {best_loss:.4f}", flush=True)
+            print(f"Mejora de rendimiento. Mejor modelo guardado en {paths['result_best_model_path']} con val_loss: {best_validation_loss:.4f}", flush=True)
+            with open(paths['log_output_path'], "a") as f:
+                f.write(f"Mejora de rendimiento. Mejor modelo guardado en {paths['result_best_model_path']} con val_loss: {best_validation_loss:.4f}\n")
     else:
         no_improve += 1
         if no_improve >= args.patience:
-            print('Early stopping activado - Entrenamiento finalizado ', flush=True)
+            if accelerator.is_main_process:
+                print('Early stopping activado - Entrenamiento finalizado ', flush=True)
+                with open(paths['log_output_path'], "a") as f:
+                    f.write(f"Early stopping activado - Entrenamiento finalizado\n")
             break
 
-    print(f"Epoch {epoch} | Train Loss: {train_loss:.4f} Acc: {train_metrics['global'][0]:.4f}")
-    print(f"           Val Loss: {val_loss:.4f} Acc_global: {val_metrics['global'][0]:.4f} Kappa_global: {val_metrics['global'][-1]:.4f} | Acc_primary: {val_metrics['primary'][0]:.4f} Kappa_primary: {val_metrics['primary'][-1]:.4f} |Acc_secondary: {val_metrics['secondary'][0]:.4f} Kappa_secondary: {val_metrics['secondary'][-1]:.4f} ")
 
+    # Saving last model
+    accelerator.wait_for_everyone()
+    accelerator.save_state(paths['result_last_model_path'])
+
+    print(f"Epoch {epoch} | Train Loss: {train_loss:.4f} auroc_macro: {train_metrics['multilabel']['auroc_macro']:.4f} auprc_macro: {train_metrics['multilabel']['auprc_macro']:.4f}")
+    print(f"           Val Loss: {val_loss:.4f} auroc_macro: {val_metrics['multilabel']['auroc_macro']:.4f} auprc_macro: {val_metrics['multilabel']['auprc_macro']:.4f}")
     with open(paths['output_file'], "a") as f: 
-        f.write(f"Epoch {epoch}|    Train Loss: {train_loss:.4f} Acc: {train_metrics['global'][0]:.4f}\n")
-        f.write(f"          Val Loss: {val_loss:.4f} Acc_global: {val_metrics['global'][0]:.4f} Kappa_global: {val_metrics['global'][-1]:.4f} | Acc_primary: {val_metrics['primary'][0]:.4f} Kappa_primary: {val_metrics['primary'][-1]:.4f} |Acc_secondary: {val_metrics['secondary'][0]:.4f} Kappa_secondary: {val_metrics['secondary'][-1]:.4f} ")
+        f.write(f"Epoch {epoch}|    Train Loss: {train_loss:.4f} auroc_macro: {train_metrics['multilabel']['auroc_macro']:.4f} auprc_macro: {train_metrics['multilabel']['auprc_macro']:.4f}\n")
+        f.write(f"          Val Loss: {val_loss:.4f} auroc_macro: {val_metrics['multilabel']['auroc_macro']:.4f} auprc_macro: {val_metrics['multilabel']['auprc_macro']:.4f} ")
         
 # =================== TEST ===================
 test_metrics, test_loss = run_epoch(model, test_loader, device, accelerator, loss, optimizer, mode='test',args=args)   
 
-print(f"Test Loss: {test_loss:.4f} Acc: {test_metrics[0]:.4f} Kappa: {test_metrics[-1]:.4f}")
+print(f"Test Loss: {test_loss:.4f}  Val Loss: {val_loss:.4f} auroc_macro: {test_metrics['multilabel']['auroc_macro']:.4f} auprc_macro: {test_metrics['multilabel']['auprc_macro']:.4f} ")
 print(f"Test Loss: {test_loss:.4f} Acc_global: {test_metrics['global'][0]:.4f} Kappa_global: {test_metrics['global'][-1]:.4f} | Acc_primary: {test_metrics['primary'][0]:.4f} Kappa_primary: {test_metrics['primary'][-1]:.4f} |Acc_secondary: {test_metrics['secondary'][0]:.4f} Kappa_secondary: {test_metrics['secondary'][-1]:.4f} ")
 with open(paths['output_file'], "a") as f:
     f.write(f" Test Loss: {test_loss:.4f}  Acc_global: {test_metrics['global'][0]:.4f} Kappa_global: {test_metrics['global'][-1]:.4f} | Acc_primary: {test_metrics['primary'][0]:.4f} Kappa_primary: {test_metrics['primary'][-1]:.4f} |Acc_secondary: {test_metrics['secondary'][0]:.4f} Kappa_secondary: {test_metrics['secondary'][-1]:.4f}\n")
