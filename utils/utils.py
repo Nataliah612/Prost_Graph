@@ -301,16 +301,35 @@ def log_barrier(z: torch.Tensor, t: float = 5.0):
     return out.sum() 
 
 def compute_metrics(y_true, y_pred):
-    y_true = _to_numpy(y_true)
-    y_pred = _to_numpy(y_pred)
+    """
+    Calcula métricas globales de clasificación.
     
-    return (
-        accuracy_score(y_true, y_pred),
-        precision_score(y_true, y_pred, average='weighted', zero_division=0),
-        recall_score(y_true, y_pred, average='weighted', zero_division=0),
-        f1_score(y_true, y_pred, average='weighted', zero_division=0),
-        cohen_kappa_score(y_true, y_pred, weights='quadratic')
-    )
+    Args:
+        y_true (array): etiquetas verdaderas
+        y_pred (array): etiquetas predichas
+    Returns:
+        dict: métricas globales (accuracy, precision, recall, f1, kappa)
+    """
+    # Asegurar que sean numpy arrays
+    if isinstance(y_true, torch.Tensor):
+        y_true = y_true.cpu().numpy()
+    if isinstance(y_pred, torch.Tensor):
+        y_pred = y_pred.cpu().numpy()
+  
+    # Métricas básicas
+    acc = accuracy_score(y_true, y_pred)
+    prec = precision_score(y_true, y_pred, average='weighted', zero_division=0)
+    rec = recall_score(y_true, y_pred, average='weighted', zero_division=0)
+    f1 = f1_score(y_true, y_pred, average='micro', zero_division=0)
+    kappa = cohen_kappa_score(y_true, y_pred, weights='quadratic')
+
+    return {
+        "accuracy": acc,
+        "precision": prec,
+        "recall": rec,
+        "f1": f1,
+        "kappa": kappa,
+    }
 
 def compute_all_gleason_metrics(y_true_primary, y_pred_primary,
                                 y_true_secondary, y_pred_secondary, y_true_onehot=None,y_probs=None):
@@ -365,7 +384,7 @@ def compute_multilabel_metrics(y_true_onehot, y_prob):
         y_prob = y_prob.cpu().numpy()
 
     # Predicciones binarias aplicando umbral 0.5
-    y_pred = (y_prob >= 0.5).astype(int)
+    y_pred = (y_prob >= 0.5).astype(int) # 0.5 -> 0.4 Para tener mas posititvos aunque no todos sean ciertos. 
     #y_pred = torch.topk(y_prob, k=2)
 
     metrics = {}

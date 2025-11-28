@@ -69,8 +69,7 @@ os.makedirs(results_path, exist_ok=True)
 
 paths = {   'output_file': os.path.join(results_path, 'output.txt'),
             'plot_kfold_path': os.path.join(results_path, 'k_fold_plot.png'),
-            'results_sicap': os.path.join(results_path),
-           
+            'results_path': results_path,
             'result_best_model_path':os.path.join(results_path, 'best_model'),
             'result_last_model_path': os.path.join(results_path, 'last_model'),
             'log_output_path':os.path.join(results_path, 'train_log_output.txt')}
@@ -122,13 +121,18 @@ sum_weights = primary_weights + secondary_weights
 # =================== TRAINING PARAMETHERS ===================
 loss = nn.BCELoss(weight=sum_weights) #WithLogitsLoss(pos_weight=sum_weights) 
 
-optimizer = optim.SGD(model.parameters(), lr=args.learning_rate, weight_decay=args.weight_decay, momentum=args.momentum) # Adam -> SGD
-scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=3, gamma=0.7)
-
+optimizer = optim.AdamW(model.parameters(), lr=args.learning_rate) #weight_decay=1e-2
+#optimizer = optim.SGD(model.parameters(), lr=args.learning_rate, weight_decay=args.weight_decay)#, momentum=args.momentum) # Adam -> SGD
+#scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=3, gamma=0.7)
+scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau( optimizer,
+                                    mode="min",  # porque usamos val_loss (minimizar)
+                                    factor=0.1,  # reduce LR a un 10% cuando no mejora
+                                    patience = args.patience,  # cuántas épocas esperar sin mejora
+    )
 model, optimizer, train_loader, val_loader, test_loader, scheduler = accelerator.prepare(
         model, optimizer, train_loader, val_loader, test_loader, scheduler )
 
-best_loss = float("inf")
+best_validation_loss = float("inf")
 no_improve = 0
 
 # =================== TRAINING ===================
@@ -139,12 +143,15 @@ for epoch in range(args.epochs):
     
     # TRAIN
     train_metrics, train_loss = run_epoch(model, train_loader, device, accelerator, loss, optimizer, mode='train', args=args)
+    if accelerator.is_main_process:
+        log_epoch_metrics(epoch, "Train", train_metrics, train_loss, paths['log_output_path'])
+        save_metrics_to_csv(train_metrics, epoch=epoch,  filepath= os.path.join(paths['results_path'], "train_train_metrics.csv"))
 
     # VALIDATION
     val_metrics, val_loss = run_epoch(model, val_loader, device, accelerator, loss, optimizer, mode = 'val',args=args)
     if accelerator.is_main_process:
         log_epoch_metrics(epoch, "Validation", val_metrics, val_loss, paths['log_output_path'])
-        save_metrics_to_csv(val_metrics, epoch=epoch,  filepath= os.path.join(paths['run_results_path'], "train_validation_metrics.csv"))
+        save_metrics_to_csv(val_metrics, epoch=epoch,  filepath= os.path.join(paths['results_path'], "train_validation_metrics.csv"))
         
     scheduler.step(val_loss)
     
@@ -171,21 +178,23 @@ for epoch in range(args.epochs):
     accelerator.wait_for_everyone()
     accelerator.save_state(paths['result_last_model_path'])
 
-    print(f"Epoch {epoch} | Train Loss: {train_loss:.4f} auroc_macro: {train_metrics['multilabel']['auroc_macro']:.4f} auprc_macro: {train_metrics['multilabel']['auprc_macro']:.4f}")
-    print(f"           Val Loss: {val_loss:.4f} auroc_macro: {val_metrics['multilabel']['auroc_macro']:.4f} auprc_macro: {val_metrics['multilabel']['auprc_macro']:.4f}")
-    with open(paths['output_file'], "a") as f: 
-        f.write(f"Epoch {epoch}|    Train Loss: {train_loss:.4f} auroc_macro: {train_metrics['multilabel']['auroc_macro']:.4f} auprc_macro: {train_metrics['multilabel']['auprc_macro']:.4f}\n")
-        f.write(f"          Val Loss: {val_loss:.4f} auroc_macro: {val_metrics['multilabel']['auroc_macro']:.4f} auprc_macro: {val_metrics['multilabel']['auprc_macro']:.4f} ")
-        
 # =================== TEST ===================
+print(f' FINALIZADO EL ENTRENAMIENTO ')
 test_metrics, test_loss = run_epoch(model, test_loader, device, accelerator, loss, optimizer, mode='test',args=args)   
 
-print(f"Test Loss: {test_loss:.4f}  Val Loss: {val_loss:.4f} auroc_macro: {test_metrics['multilabel']['auroc_macro']:.4f} auprc_macro: {test_metrics['multilabel']['auprc_macro']:.4f} ")
-print(f"Test Loss: {test_loss:.4f} Acc_global: {test_metrics['global'][0]:.4f} Kappa_global: {test_metrics['global'][-1]:.4f} | Acc_primary: {test_metrics['primary'][0]:.4f} Kappa_primary: {test_metrics['primary'][-1]:.4f} |Acc_secondary: {test_metrics['secondary'][0]:.4f} Kappa_secondary: {test_metrics['secondary'][-1]:.4f} ")
-with open(paths['output_file'], "a") as f:
-    f.write(f" Test Loss: {test_loss:.4f}  Acc_global: {test_metrics['global'][0]:.4f} Kappa_global: {test_metrics['global'][-1]:.4f} | Acc_primary: {test_metrics['primary'][0]:.4f} Kappa_primary: {test_metrics['primary'][-1]:.4f} |Acc_secondary: {test_metrics['secondary'][0]:.4f} Kappa_secondary: {test_metrics['secondary'][-1]:.4f}\n")
-    f.write(f"Acuracy: {test_metrics[0]}, | Precision: {test_metrics[1]} | Recall : {test_metrics[2]}| F1 Score: {test_metrics[3]}")
-    f.write(f"Métricas : {test_metrics}")
+accelerator.wait_for_everyone()
+    
+# Cargar el estado completo guardado por accelerate, result_best_model_path es la carpeta creada por save_state
+try:
+    accelerator.load_state(paths['result_best_model_path'])
+    print(f"Checkpoint cargado exitosamente desde {paths['result_best_model_path']}")
+except Exception as e:
+    print(f"Error cargando checkpoint de accelerate: {e}")
+
+if accelerator.is_main_process:
+    log_epoch_metrics(epoch, "Test", test_metrics, test_loss, paths['log_output_path'])
+    save_metrics_to_csv(test_metrics, epoch=epoch,  filepath= os.path.join(paths['results_path'], "test_metrics.csv"))
+        
 
 # =================== INFERENCE ===================
 if args.inference == True: 

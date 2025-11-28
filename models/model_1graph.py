@@ -156,7 +156,7 @@ def get_keep_ia3_model(model_path = '/workspace/data/model_keep/' , checkpoint_p
     model = torch.compile(model) # Activar torch.compile si usas PyTorch 2.0+
     # Congelar TODO menos IA3
     for name, param in ia3_model.named_parameters():
-        #if ".ia3" not in name and '.2' not in name:
+        if ".ia3" not in name and '.20' not in name and '.21' not in name:
         #if "blocks.23.mlp.fc1.ia3" not in name and "blocks.22.mlp.fc1.ia3" not in name and "blocks.21.mlp.fc1.ia3" not in name :
             param.requires_grad = False
     ia3_model.print_trainable_parameters()
