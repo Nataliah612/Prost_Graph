@@ -151,12 +151,11 @@ def get_keep_ia3_model(model_path = '/workspace/data/model_keep/' , checkpoint_p
     )
 
     ia3_model = get_peft_model(model, ia3_config)
-    
    
     model = torch.compile(model) # Activar torch.compile si usas PyTorch 2.0+
     # Congelar TODO menos IA3
     for name, param in ia3_model.named_parameters():
-        if ".ia3" not in name and '.20' not in name and '.21' not in name:
+        if ".ia3" not in name and 'proj' not in name and 'blocks.2' not in name:
         #if "blocks.23.mlp.fc1.ia3" not in name and "blocks.22.mlp.fc1.ia3" not in name and "blocks.21.mlp.fc1.ia3" not in name :
             param.requires_grad = False
     ia3_model.print_trainable_parameters()
@@ -211,9 +210,9 @@ class gat(torch.nn.Module):
         super(gat, self).__init__()
         self.gat1 = GATv2Conv(768, 256, heads=heads, concat=False)
         self.gat2 = GATv2Conv(256, 64, heads=heads, concat=False)
-         # Debe aceptar batch
+        
         self.Aggr = Aggregate_Attnt(L=256, I=1)
-        #self.Aggr.apply(weights_init)
+        
         self.classifier = mlp(in_dim=64, out_dim=4)
 
     def forward(self, graph_list):
