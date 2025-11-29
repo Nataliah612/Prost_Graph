@@ -64,7 +64,7 @@ def compute_class_weights(labels):
 
 def run_epoch(model, dataloader, device, accelerator, 
               loss_BCE, optimizer=None,
-              args=None, mode="train"):
+              args=None, mode="train", y_prob_thresh=0.5):
     """
     Ejecuta una época completa (train, val o test) y devuelve métricas y pérdida media.
 
@@ -173,7 +173,7 @@ def run_epoch(model, dataloader, device, accelerator,
         y_true_secondary=y_true2,
         y_pred_secondary=y_pred2,
         y_true_onehot=y_onehot,
-        y_probs=probs,
+        y_probs=probs,y_prob_thresh=y_prob_thresh
     )
 
     return metrics, epoch_loss
@@ -332,7 +332,7 @@ def compute_metrics(y_true, y_pred):
     }
 
 def compute_all_gleason_metrics(y_true_primary, y_pred_primary,
-                                y_true_secondary, y_pred_secondary, y_true_onehot=None,y_probs=None):
+                                y_true_secondary, y_pred_secondary, y_true_onehot=None,y_probs=None, y_prob_thresh=0.5):
     """
     Calcula las métricas para Gleason primario, secundario y global.
     
@@ -367,10 +367,10 @@ def compute_all_gleason_metrics(y_true_primary, y_pred_primary,
 
      # --- Multilabel ---
     if y_true_onehot is not None and y_probs is not None:
-        metrics["multilabel"] = compute_multilabel_metrics(y_true_onehot, y_probs)
+        metrics["multilabel"] = compute_multilabel_metrics(y_true_onehot, y_probs, y_prob_thresh)
 
     return metrics
-def compute_multilabel_metrics(y_true_onehot, y_prob):
+def compute_multilabel_metrics(y_true_onehot, y_prob, y_prob_thresh = 0.5):
     """
     Métricas para clasificación multietiqueta.
 
@@ -384,7 +384,7 @@ def compute_multilabel_metrics(y_true_onehot, y_prob):
         y_prob = y_prob.cpu().numpy()
 
     # Predicciones binarias aplicando umbral 0.5
-    y_pred = (y_prob >= 0.5).astype(int) # 0.5 -> 0.4 Para tener mas posititvos aunque no todos sean ciertos. 
+    y_pred = (y_prob >= y_prob_thresh).astype(int) # 0.5 -> 0.4 Para tener mas posititvos aunque no todos sean ciertos. 
     #y_pred = torch.topk(y_prob, k=2)
 
     metrics = {}
