@@ -98,7 +98,7 @@ class KEEPModel(PreTrainedModel):
             "text_features": text_features       
         }
 
-def get_keep_ia3_model(model_path = '/workspace/data/model_keep/' , checkpoint_path= '/workspace/data/model_keep/pytorch_model.bin'):
+def get_keep_ia3_model(model_path = '/workspace/data/model_keep/' , checkpoint_path= '/workspace/data/model_keep/pytorch_model.bin', pretrain=False):
     #model_name = "Astaxanthin/KEEP" # Modelo preentrenado 
 
     AutoConfig.register("keep", KEEPConfig)
@@ -120,15 +120,6 @@ def get_keep_ia3_model(model_path = '/workspace/data/model_keep/' , checkpoint_p
     model = AutoModel.from_config(config)
     state_dict = torch.load(checkpoint_path, map_location='cpu')
     model.load_state_dict(state_dict, strict=True)
-
-   
-    '''model = AutoModel.from_pretrained( # Carga el modelo 
-        model_name,
-        trust_remote_code=True,             # Ejecuta el codio en remoto
-        quantization_config=bnb_config,     # Introduce la configuracion de carga del modelo
-        #force_download=True,                # Descarga del modelo 
-        low_cpu_mem_usage = True            # Reduce memoria en la carga
-    )'''
         
     # Activar gradient checkpointing para reducir VRAM
     if hasattr(model, "gradient_checkpointing"):
@@ -154,14 +145,20 @@ def get_keep_ia3_model(model_path = '/workspace/data/model_keep/' , checkpoint_p
    
     model = torch.compile(model) # Activar torch.compile si usas PyTorch 2.0+
     # Congelar TODO menos IA3
-    for name, param in ia3_model.named_parameters():
-        if ".ia3" not in name and 'proj' not in name and 'blocks.2' not in name:
-        #if "blocks.23.mlp.fc1.ia3" not in name and "blocks.22.mlp.fc1.ia3" not in name and "blocks.21.mlp.fc1.ia3" not in name :
-            param.requires_grad = False
+    if pretrain == True:
+        for name, param in ia3_model.named_parameters():
+            if "visual.blocks.23.attn.proj.ia3_l" not in name:
+            #if "blocks.23.mlp.fc1.ia3" not in name and "blocks.22.mlp.fc1.ia3" not in name and "blocks.21.mlp.fc1.ia3" not in name :
+                param.requires_grad = False
+            else:
+                param.requires_grad = True
+    else: 
+        param.requires_grad = False
     ia3_model.print_trainable_parameters()
 
     # 7. Envolver con tu modelo final
     net = KEEPForGleason(ia3_model, model_graph)
+   
     return net
 
 class KEEPForGleason(nn.Module):

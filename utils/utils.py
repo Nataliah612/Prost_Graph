@@ -64,7 +64,7 @@ def compute_class_weights(labels):
 
 def run_epoch(model, dataloader, device, accelerator, 
               loss_BCE, optimizer=None,
-              args=None, mode="train", y_prob_thresh=0.5):
+              args=None, mode="train"):
     """
     Ejecuta una época completa (train, val o test) y devuelve métricas y pérdida media.
 
@@ -142,7 +142,7 @@ def run_epoch(model, dataloader, device, accelerator,
         total_loss_sum += accelerator.gather(total_loss.detach() * batch_sz).sum().item()
 
         # --- Predicciones (selección de primary/secondary a partir de proporciones) ---
-        pred_primary, pred_secondary = select_gleason_grades_from_batch_proportions(wsi_proportions)
+        pred_primary, pred_secondary = select_gleason_grades_from_batch_proportions(wsi_proportions, args.tumor_abs_thresh)
 
         # --- Probabilidades asociadas ---
         probs = wsi_prediction.detach().cpu()
@@ -173,7 +173,7 @@ def run_epoch(model, dataloader, device, accelerator,
         y_true_secondary=y_true2,
         y_pred_secondary=y_pred2,
         y_true_onehot=y_onehot,
-        y_probs=probs,y_prob_thresh=y_prob_thresh
+        y_probs=probs,y_prob_thresh=args.y_prob_thresh
     )
 
     return metrics, epoch_loss
@@ -413,7 +413,7 @@ def compute_multilabel_metrics(y_true_onehot, y_prob, y_prob_thresh = 0.5):
     metrics["f1_macro"] = f1_score(
         y_true_onehot, y_pred, average="macro", zero_division=0
     )
-
+   
     # AUROC (promedio macro por etiqueta)
     metrics["auroc_macro"] = roc_auc_score(
         y_true_onehot, y_prob, average="macro"

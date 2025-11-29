@@ -30,6 +30,7 @@ def parse_args():
 
     parser.add_argument("--inference",action="store_true",default=False, help="Usar una BBDD para hacer inferencia despues del entrenamiento.")
     parser.add_argument("--small_dataset",action="store_true",default=False, help="Usar un subset de la BBDD para el entrenamiento.")
+    parser.add_argument("--pre_train",action="store_true",default=False, help="Preentrena capas del modelo fundacional KEEP.")
 
     parser.add_argument("--results_path", type=str, default='/workspace/results', help="Ruta donde se guardaran los resultados")
 
@@ -43,6 +44,8 @@ def parse_args():
     parser.add_argument("--seed", type=int, default=98, help="Semilla aleatoria")
     parser.add_argument("--num_workers", type=int, default=2, help="Numero de paralelizaciones")
 
+    parser.add_argument("--y_prob_thresh", default=0.3, type=float)
+    parser.add_argument("--tumor_abs_thresh", default=0.2, type=float)
     parser.add_argument("--alpha_pe", default=0.01, type=float)
     parser.add_argument("--alpha_pc", default=0.01, type=float)
 
@@ -52,7 +55,7 @@ def parse_args():
 CUDA_LAUNCH_BLOCKING=1
 use_amp = torch.cuda.is_available()  # mixed precision if GPU available
 args = parse_args()
-args.small_dataset = True
+
 # Multi-GPU accelerator init
 accelerator = Accelerator()
 device = accelerator.device
@@ -75,7 +78,7 @@ paths = {   'output_file': os.path.join(results_path, 'output.txt'),
             'log_output_path':os.path.join(results_path, 'train_log_output.txt')}
 
 # =================== PMODEL CONFIGURATION ===================
-model = get_keep_ia3_model().to(device)
+model = get_keep_ia3_model(args.pretrain).to(device)
 model = torch.nn.SyncBatchNorm.convert_sync_batchnorm(model)
 
 # =================== LOADING DATA ===================
@@ -122,8 +125,7 @@ sum_weights = primary_weights + secondary_weights
 loss = nn.BCELoss(weight=sum_weights) #WithLogitsLoss(pos_weight=sum_weights) 
 
 optimizer = optim.AdamW(model.parameters(), lr=args.learning_rate) #weight_decay=1e-2
-#optimizer = optim.SGD(model.parameters(), lr=args.learning_rate, weight_decay=args.weight_decay)#, momentum=args.momentum) # Adam -> SGD
-#scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=3, gamma=0.7)
+
 scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau( optimizer,
                                     mode="min",  # porque usamos val_loss (minimizar)
                                     factor=0.1,  # reduce LR a un 10% cuando no mejora
@@ -135,72 +137,67 @@ model, optimizer, train_loader, val_loader, test_loader, scheduler = accelerator
 best_validation_loss = float("inf")
 no_improve = 0
 
-y_prob_thresh_list = [0.3,0.4,0.5,0.6]
-
-for y_prob_thresh in y_prob_thresh_list: 
+# =================== TRAINING ===================
+for epoch in range(args.epochs):
+    print(f"\nEpoch {epoch}")
     with open(paths['output_file'], "a") as f:
-            f.write(f"\n prob_threshold {y_prob_thresh}\n")
+        f.write(f"\nEpoch {epoch}\n")
+    
+    # TRAIN
+    train_metrics, train_loss = run_epoch(model, train_loader, device, accelerator, loss, optimizer, mode='train', args=args)
+    if accelerator.is_main_process:
+        log_epoch_metrics(epoch, "Train", train_metrics, train_loss, paths['log_output_path'])
+        save_metrics_to_csv(train_metrics, epoch=epoch,  filepath= os.path.join(paths['results_path'], "train_train_metrics.csv"))
 
-    # =================== TRAINING ===================
-    for epoch in range(args.epochs):
-        print(f"\nEpoch {epoch}")
-        with open(paths['output_file'], "a") as f:
-            f.write(f"\nEpoch {epoch}\n")
-        
-        # TRAIN
-        train_metrics, train_loss = run_epoch(model, train_loader, device, accelerator, loss, optimizer, mode='train', y_prob_thresh=y_prob_thresh, args=args)
-        if accelerator.is_main_process:
-            log_epoch_metrics(epoch, "Train", train_metrics, train_loss, paths['log_output_path'])
-            save_metrics_to_csv(train_metrics, epoch=epoch,  filepath= os.path.join(paths['results_path'], "train_train_metrics.csv"))
-
-        # VALIDATION
-        val_metrics, val_loss = run_epoch(model, val_loader, device, accelerator, loss, optimizer, mode = 'val',args=args)
-        if accelerator.is_main_process:
-            log_epoch_metrics(epoch, "Validation", val_metrics, val_loss, paths['log_output_path'])
-            save_metrics_to_csv(val_metrics, epoch=epoch,  filepath= os.path.join(paths['results_path'], "train_validation_metrics.csv"))
-            
-        scheduler.step(val_loss)
-        
-        #  Early Stopping / Checkpoint
-        accelerator.wait_for_everyone()
-        if val_loss < best_validation_loss:
-            best_validation_loss, no_improve = val_loss, 0
-            accelerator.save_state(paths['result_best_model_path'])
-            if accelerator.is_main_process:
-                print(f"Mejora de rendimiento. Mejor modelo guardado en {paths['result_best_model_path']} con val_loss: {best_validation_loss:.4f}", flush=True)
-                with open(paths['log_output_path'], "a") as f:
-                    f.write(f"Mejora de rendimiento. Mejor modelo guardado en {paths['result_best_model_path']} con val_loss: {best_validation_loss:.4f}\n")
-        else:
-            no_improve += 1
-            if no_improve >= args.patience:
-                if accelerator.is_main_process:
-                    print('Early stopping activado - Entrenamiento finalizado ', flush=True)
-                    with open(paths['log_output_path'], "a") as f:
-                        f.write(f"Early stopping activado - Entrenamiento finalizado\n")
-                break
-
-
-        # Saving last model
-        accelerator.wait_for_everyone()
-        accelerator.save_state(paths['result_last_model_path'])
-
-    # =================== TEST ===================
-    print(f' FINALIZADO EL ENTRENAMIENTO ')
-    test_metrics, test_loss = run_epoch(model, test_loader, device, accelerator, loss, optimizer, mode='test',args=args)   
-
-    accelerator.wait_for_everyone()
-        
-    # Cargar el estado completo guardado por accelerate, result_best_model_path es la carpeta creada por save_state
-    try:
-        accelerator.load_state(paths['result_best_model_path'])
-        print(f"Checkpoint cargado exitosamente desde {paths['result_best_model_path']}")
-    except Exception as e:
-        print(f"Error cargando checkpoint de accelerate: {e}")
+    # VALIDATION
+    val_metrics, val_loss = run_epoch(model, val_loader, device, accelerator, loss, optimizer, mode='val', args=args)
 
     if accelerator.is_main_process:
-        log_epoch_metrics(epoch, "Test", test_metrics, test_loss, paths['log_output_path'])
-        save_metrics_to_csv(test_metrics, epoch=epoch,  filepath= os.path.join(paths['results_path'], "test_metrics.csv"))
-            
+        log_epoch_metrics(epoch, "Validation", val_metrics, val_loss, paths['log_output_path'])
+        save_metrics_to_csv(val_metrics, epoch=epoch,  filepath= os.path.join(paths['results_path'], "train_validation_metrics.csv"))
+        
+    scheduler.step(val_loss)
+    
+    #  Early Stopping / Checkpoint
+    accelerator.wait_for_everyone()
+    if val_loss < best_validation_loss:
+        best_validation_loss, no_improve = val_loss, 0
+        accelerator.save_state(paths['result_best_model_path'])
+        if accelerator.is_main_process:
+            print(f"Mejora de rendimiento. Mejor modelo guardado en {paths['result_best_model_path']} con val_loss: {best_validation_loss:.4f}", flush=True)
+            with open(paths['log_output_path'], "a") as f:
+                f.write(f"Mejora de rendimiento. Mejor modelo guardado en {paths['result_best_model_path']} con val_loss: {best_validation_loss:.4f}\n")
+    else:
+        no_improve += 1
+        if no_improve >= args.patience:
+            if accelerator.is_main_process:
+                print('Early stopping activado - Entrenamiento finalizado ', flush=True)
+                with open(paths['log_output_path'], "a") as f:
+                    f.write(f"Early stopping activado - Entrenamiento finalizado\n")
+            break
+
+
+    # Saving last model
+    accelerator.wait_for_everyone()
+    accelerator.save_state(paths['result_last_model_path'])
+
+# =================== TEST ===================
+print(f' FINALIZADO EL ENTRENAMIENTO ')
+test_metrics, test_loss = run_epoch(model, test_loader, device, accelerator, loss, optimizer, mode='test',args=args)   
+
+accelerator.wait_for_everyone()
+    
+# Cargar el estado completo guardado por accelerate, result_best_model_path es la carpeta creada por save_state
+try:
+    accelerator.load_state(paths['result_best_model_path'])
+    print(f"Checkpoint cargado exitosamente desde {paths['result_best_model_path']}")
+except Exception as e:
+    print(f"Error cargando checkpoint de accelerate: {e}")
+
+if accelerator.is_main_process:
+    log_epoch_metrics(epoch, "Test", test_metrics, test_loss, paths['log_output_path'])
+    save_metrics_to_csv(test_metrics, epoch=epoch,  filepath= os.path.join(paths['results_path'], "test_metrics.csv"))
+        
 
 # =================== INFERENCE ===================
 if args.inference == True: 
