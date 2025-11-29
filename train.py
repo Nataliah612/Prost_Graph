@@ -30,7 +30,7 @@ def parse_args():
 
     parser.add_argument("--inference",action="store_true",default=False, help="Usar una BBDD para hacer inferencia despues del entrenamiento.")
     parser.add_argument("--small_dataset",action="store_true",default=False, help="Usar un subset de la BBDD para el entrenamiento.")
-    parser.add_argument("--pre_train",action="store_true",default=False, help="Preentrena capas del modelo fundacional KEEP.")
+    parser.add_argument("--pretrain",action="store_true",default=False, help="Preentrena capas del modelo fundacional KEEP.")
 
     parser.add_argument("--results_path", type=str, default='/workspace/results', help="Ruta donde se guardaran los resultados")
 
@@ -78,7 +78,7 @@ paths = {   'output_file': os.path.join(results_path, 'output.txt'),
             'log_output_path':os.path.join(results_path, 'train_log_output.txt')}
 
 # =================== PMODEL CONFIGURATION ===================
-model = get_keep_ia3_model(args.pretrain).to(device)
+model = get_keep_ia3_model(pretrain=args.pretrain).to(device)
 model = torch.nn.SyncBatchNorm.convert_sync_batchnorm(model)
 
 # =================== LOADING DATA ===================
