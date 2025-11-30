@@ -28,3 +28,4 @@ soxr==0.3.7
 
 # Protocol buffers
 protobuf==4.25.3
+#conch-wsi

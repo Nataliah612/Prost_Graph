@@ -94,7 +94,7 @@ class RAM_WSI_Dataset(Dataset):
     ])
 
         # Precargar imágenes y etiquetas en RAM
-        self.images, self.labels = [], []
+        self.images, self.labels, valid_indices= [], [], []
         for i in tqdm(self.indices, desc="Loading WSI", file=sys.stdout):
             row = self.dataframe.iloc[i]
             label = torch.tensor(
@@ -111,6 +111,10 @@ class RAM_WSI_Dataset(Dataset):
 
             imgs_tensor = torch.stack([self.transform(Image.fromarray(img).convert('RGB')) for img in imgs])
             self.images.append(imgs_tensor)
+            valid_indices.append(i)  # agregamos solo los que cargamos
+
+        # Reemplazamos la lista original de índices por los válidos
+        self.indices = valid_indices
 
         # Mapeo índice original → posición en listas cargadas
         self.idx2pos = {orig_idx: pos for pos, orig_idx in enumerate(self.indices)}
