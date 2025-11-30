@@ -13,7 +13,7 @@ import timm
 import numpy
 
 import os
-from conch.open_clip_custom import create_model_from_pretrained
+#from conch.open_clip_custom import create_model_from_pretrained
 
 
 from transformers import BitsAndBytesConfig, PretrainedConfig, PreTrainedModel, BertModel, AutoConfig, AutoModel, BertConfig
@@ -101,7 +101,7 @@ class KEEPModel(PreTrainedModel):
             "text_features": text_features       
         }
 
-def get_keep_ia3_model(checkpoint_path= '/workspace/data/model_keep/pytorch_model.bin', model_name = 'keep',pretrain=False):
+def get_keep_ia3_model(checkpoint_path= '/workspace/data/MODELS/model_keep/pytorch_model.bin', model_name = 'keep',pretrain=False):
     
     
     
@@ -114,25 +114,25 @@ def get_keep_ia3_model(checkpoint_path= '/workspace/data/model_keep/pytorch_mode
         bnb_4bit_use_double_quant=True,         # Usa doble cuanticicacion
         bnb_4bit_quant_type="nf4",              # Variante de tipo de cuqntificacion de 4 bits 
     )
-    if model_name == 'keep': 
-        model_path = '/workspace/data/MODELS/model_keep/'
-        checkpoint_path= '/workspace/data/model_keep/pytorch_model.bin'
-        config = AutoConfig.from_pretrained(model_path + 'config.json',
-                                        trust_remote_code=True,             # Ejecuta el codio en remoto
-                                        quantization_config=bnb_config,     # Introduce la configuracion de carga del modelo
-                                        #force_download=True,                # Descarga del modelo 
-                                        low_cpu_mem_usage = True            # Reduce memoria en la carga
-        )
-        model = AutoModel.from_config(config)
-        state_dict = torch.load(checkpoint_path, map_location='cpu')
-        model.load_state_dict(state_dict, strict=True)
-    elif model_name == 'conch': 
+    
+    model_path = '/workspace/data/MODELS/model_keep/'
+    checkpoint_path= '/workspace/data/MODELS/model_keep/pytorch_model.bin'
+    config = AutoConfig.from_pretrained(model_path + 'config.json',
+                                    trust_remote_code=True,             # Ejecuta el codio en remoto
+                                    quantization_config=bnb_config,     # Introduce la configuracion de carga del modelo
+                                    #force_download=True,                # Descarga del modelo 
+                                    low_cpu_mem_usage = True            # Reduce memoria en la carga
+    )
+    model = AutoModel.from_config(config)
+    state_dict = torch.load(checkpoint_path, map_location='cpu')
+    model.load_state_dict(state_dict, strict=True)
+    '''elif model_name == 'conch': 
         model_path = '/workspace/data/MODELS/model_keep/'
         checkpoint_path= '/workspace/data/model_keep/pytorch_model.bin'
         # Cargar modelo (suponiendo que ya descargaste los pesos a checkpoints/conch/pytorch_model.bin)
         model, preprocess = create_model_from_pretrained(
             "conch_ViT-B-16",
-            checkpoint_path="/workspace/data/model_keep/pytorch_model.bin")
+            checkpoint_path="/workspace/data/model_keep/pytorch_model.bin")'''
         
     # Activar gradient checkpointing para reducir VRAM
     if hasattr(model, "gradient_checkpointing"):
