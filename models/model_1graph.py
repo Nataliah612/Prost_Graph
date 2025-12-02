@@ -281,7 +281,7 @@ class mlp(nn.Module):
     def __init__(self, in_dim=64, out_dim=4):
         super().__init__()
         self.ln = nn.LayerNorm(in_dim)
-        self.dropout = nn.Dropout(0.3)
+        self.dropout = nn.Dropout(0.1)
         self.fc = nn.Linear(in_dim, out_dim)
 
     def forward(self, x):
