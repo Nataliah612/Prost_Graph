@@ -15,7 +15,7 @@ from accelerate import Accelerator
 # =============== IMPORT FUNCIONES ======================
 from models.model_1graph import get_keep_ia3_model
 from utils.data_load import create_file_label_df, RAM_WSI_Dataset, collate_fn
-from utils.utils import run_epoch, compute_class_weights, set_multiple_seed, log_epoch_metrics, save_metrics_to_csv
+from utils.utils import run_epoch, compute_class_weights, set_multiple_seed, log_epoch_metrics, save_metrics_to_csv, selecting_thresholds
 
 os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "max_split_size_mb:128"
 gc.collect()
@@ -64,7 +64,7 @@ torch.cuda.empty_cache()
 set_multiple_seed(args.seed)
 
 # =================== PATHS DEFINITION ===================
-name = f"try_{args.learning_rate}_{args.batch_size}_{args.epochs}"
+name = f"try_{args.learning_rate}_{args.batch_size}_{args.epochs}_opt_threshold"
 
 results_path = os.path.join(args.results_path, name)
 os.makedirs(results_path, exist_ok=True)
@@ -76,7 +76,7 @@ paths = {   'output_file': os.path.join(results_path, 'output.txt'),
             'result_last_model_path': os.path.join(results_path, 'last_model'),
             'log_output_path':os.path.join(results_path, 'train_log_output.txt')}
 
-# =================== PMODEL CONFIGURATION ===================
+# =================== MODEL CONFIGURATION ===================
 model = get_keep_ia3_model(pretrain=args.pretrain).to(device)
 model = torch.nn.SyncBatchNorm.convert_sync_batchnorm(model)
 
@@ -93,8 +93,8 @@ df_train['gleason_secondary_mapped'] = df_train['gleason_secondary'].map(label_m
 df_train['gleason_score'] = df_train['gleason_score'].astype(int)
 
 # =================== DATA SPLIT ===================
-train_val_idx, test_idx = train_test_split(df_train.index, test_size=0.15, stratify=df_train["gleason_score"])
-train_idx, val_idx = train_test_split(train_val_idx, test_size=0.10, stratify=df_train.loc[train_val_idx]["gleason_score"])
+train_val_idx, test_idx = train_test_split(df_train.index, test_size=0.10, stratify=df_train["gleason_score"])
+train_idx, val_idx = train_test_split(train_val_idx, test_size=0.20, stratify=df_train.loc[train_val_idx]["gleason_score"])
 
 # =================== DATALOADERS ===================
 dl_kwargs = {"batch_size": args.batch_size, "collate_fn": collate_fn, "num_workers": args.num_workers}
@@ -103,7 +103,7 @@ if torch.cuda.is_available():
 
 inicio__load = time.time() 
 print("Loading embeddings for Training ...")
-train_loader = DataLoader(RAM_WSI_Dataset(df_train, train_idx), shuffle=True, **dl_kwargs)
+train_loader = DataLoader(RAM_WSI_Dataset(df_train, train_idx, random_subsets= True), shuffle=True, **dl_kwargs)
 print("Loading embeddings for Validation ...")
 val_loader = DataLoader(RAM_WSI_Dataset(df_train, val_idx), shuffle=False, **dl_kwargs)
 print("Loading embeddings for Test ...")
@@ -135,6 +135,7 @@ model, optimizer, train_loader, val_loader, test_loader, scheduler = accelerator
 
 best_validation_loss = float("inf")
 no_improve = 0
+best_y_prob_threshold, best_tumor_abs_threshold = 0,0
 
 # =================== TRAINING ===================
 for epoch in range(args.epochs):
@@ -149,8 +150,11 @@ for epoch in range(args.epochs):
         save_metrics_to_csv(train_metrics, epoch=epoch,  filepath= os.path.join(paths['results_path'], "train_train_metrics.csv"))
 
     # VALIDATION
-    val_metrics, val_loss = run_epoch(model, val_loader, device, accelerator, loss, optimizer, mode='val', args=args)
-
+    #val_metrics, val_loss = run_epoch(model, val_loader, device, accelerator, loss, None, mode='val', args=args)
+    val_metrics, val_loss, y_prob_threshold, tumor_abs_threshold = selecting_thresholds(model, val_loader, device, accelerator,
+                                                                                        loss, args)
+    print("Selected thresholds - y_prob_threshold:", y_prob_threshold, " tumor_abs_threshold:", tumor_abs_threshold, flush=True)
+        
     if accelerator.is_main_process:
         log_epoch_metrics(epoch, "Validation", val_metrics, val_loss, paths['log_output_path'])
         save_metrics_to_csv(val_metrics, epoch=epoch,  filepath= os.path.join(paths['results_path'], "train_validation_metrics.csv"))
@@ -161,6 +165,7 @@ for epoch in range(args.epochs):
     accelerator.wait_for_everyone()
     if val_loss < best_validation_loss:
         best_validation_loss, no_improve = val_loss, 0
+        best_y_prob_threshold, best_tumor_abs_threshold = y_prob_threshold, tumor_abs_threshold
         accelerator.save_state(paths['result_best_model_path'])
         if accelerator.is_main_process:
             print(f"Mejora de rendimiento. Mejor modelo guardado en {paths['result_best_model_path']} con val_loss: {best_validation_loss:.4f}", flush=True)
@@ -182,7 +187,7 @@ for epoch in range(args.epochs):
 
 # =================== TEST ===================
 print(f' FINALIZADO EL ENTRENAMIENTO ')
-test_metrics, test_loss = run_epoch(model, test_loader, device, accelerator, loss, optimizer, mode='test',args=args)   
+test_metrics, test_loss = run_epoch(model, test_loader, device, accelerator, loss, None, mode='test',args=args)   
 
 accelerator.wait_for_everyone()
     
@@ -214,7 +219,7 @@ if args.inference == True:
     print("Loading embeddings for Inference ...")
     inference_loader = DataLoader(RAM_WSI_Dataset(df_test, df_test.index), shuffle=False, **dl_kwargs)
 
-    inference_metrics, inference_loss = run_epoch(model, inference_loader, device, accelerator, loss, optimizer, mode='test',args=args)   
+    inference_metrics, inference_loss = run_epoch(model, inference_loader, device, accelerator, loss, None, mode='test',args=args)   
 
     print(f"Test Loss: {inference_loss:.4f} Acc: {inference_metrics[0]:.4f} Kappa: {inference_metrics[-1]:.4f}")
     print(f"Test Loss: {inference_loss:.4f} Acc_global: {inference_metrics['global'][0]:.4f} Kappa_global: {inference_metrics['global'][-1]:.4f} | Acc_primary: {inference_metrics['primary'][0]:.4f} Kappa_primary: {inference_metrics['primary'][-1]:.4f} |Acc_secondary: {inference_metrics['secondary'][0]:.4f} Kappa_secondary: {inference_metrics['secondary'][-1]:.4f} ")

@@ -64,7 +64,7 @@ def compute_class_weights(labels):
 
 def run_epoch(model, dataloader, device, accelerator, 
               loss_BCE, optimizer=None,
-              args=None, mode="train"):
+              args=None, mode="train",y_prob_threshold=0.4, tumor_abs_threshold=0.05):
     """
     Ejecuta una época completa (train, val o test) y devuelve métricas y pérdida media.
 
@@ -142,7 +142,7 @@ def run_epoch(model, dataloader, device, accelerator,
         total_loss_sum += accelerator.gather(total_loss.detach() * batch_sz).sum().item()
 
         # --- Predicciones (selección de primary/secondary a partir de proporciones) ---
-        pred_primary, pred_secondary = select_gleason_grades_from_batch_proportions(wsi_proportions, args.tumor_abs_thresh)
+        pred_primary, pred_secondary = select_gleason_grades_from_batch_proportions(wsi_proportions,tumor_abs_threshold)
 
         # --- Probabilidades asociadas ---
         probs = wsi_prediction.detach().cpu()
@@ -173,10 +173,12 @@ def run_epoch(model, dataloader, device, accelerator,
         y_true_secondary=y_true2,
         y_pred_secondary=y_pred2,
         y_true_onehot=y_onehot,
-        y_probs=probs,y_prob_thresh=args.y_prob_thresh
+        y_probs=probs,y_prob_thresh=y_prob_threshold
     )
-
-    return metrics, epoch_loss
+    if mode=='val':
+        return metrics, epoch_loss, y_true1,y_pred1,y_true2,y_pred2,y_onehot,probs
+    else:
+        return metrics, epoch_loss
 
 def select_gleason_grades_from_batch_proportions(proportions, tumor_abs_thresh=0.05):
     """
@@ -300,6 +302,50 @@ def log_barrier(z: torch.Tensor, t: float = 5.0):
     out = torch.where(mask, branch1, branch2)  
     return out.sum() 
 
+
+def selecting_thresholds(model, val_loader, device, accelerator, loss_BCE, args):
+    # Primero obtenemos un forward completo
+
+    best_score1, best_score2 = -1, -1
+    best_metrics = {}
+    best_t1, best_t2 = None, None
+
+    thresh_list = [0.1,0.2,0.3,0.4,0.5, 0.6]
+
+    for t1 in thresh_list:
+        val_metrics, val_loss,y_true1,y_pred1, y_true2, y_pred2, y_onehot, probs, = run_epoch(
+        model, val_loader, device, accelerator,
+        loss_BCE,
+        optimizer=None,
+        args=args,
+        mode="val",
+        tumor_abs_threshold=t1,  # temporal
+        y_prob_threshold=args.y_prob_thresh
+    )
+        for t2 in thresh_list:
+
+            metrics = compute_all_gleason_metrics(
+            y_true_primary=y_true1,
+            y_pred_primary=y_pred1,
+            y_true_secondary=y_true2,
+            y_pred_secondary=y_pred2,
+            y_true_onehot=y_onehot,
+            y_probs=probs, y_prob_thresh=t2)
+
+            score_f1 = metrics['multilabel']["f1_micro"] 
+            score_acc = metrics['global']["accuracy"]  
+            
+            if score_acc > best_score2 :
+                best_score2 = score_acc
+                best_t1 = t1
+
+            if score_f1 > best_score1 :
+                best_score1 = score_f1
+                best_t2 = t2
+                best_metrics = metrics
+
+    return val_metrics, val_loss ,best_t1, best_t2    
+
 def compute_metrics(y_true, y_pred):
     """
     Calcula métricas globales de clasificación.
@@ -332,7 +378,7 @@ def compute_metrics(y_true, y_pred):
     }
 
 def compute_all_gleason_metrics(y_true_primary, y_pred_primary,
-                                y_true_secondary, y_pred_secondary, y_true_onehot=None,y_probs=None, y_prob_thresh=0.5):
+                                y_true_secondary, y_pred_secondary, y_true_onehot=None,y_probs=None, y_prob_thresh=0.5, tumor_abs_threshold=0.05):
     """
     Calcula las métricas para Gleason primario, secundario y global.
     
@@ -367,10 +413,10 @@ def compute_all_gleason_metrics(y_true_primary, y_pred_primary,
 
      # --- Multilabel ---
     if y_true_onehot is not None and y_probs is not None:
-        metrics["multilabel"] = compute_multilabel_metrics(y_true_onehot, y_probs, y_prob_thresh)
+        metrics["multilabel"] = compute_multilabel_metrics(y_true_onehot, y_probs, y_prob_thresh, tumor_abs_threshold)
 
     return metrics
-def compute_multilabel_metrics(y_true_onehot, y_prob, y_prob_thresh = 0.5):
+def compute_multilabel_metrics(y_true_onehot, y_prob, y_prob_thresh = 0.5, tumor_abs_threshold=0.05):
     """
     Métricas para clasificación multietiqueta.
 
@@ -389,6 +435,8 @@ def compute_multilabel_metrics(y_true_onehot, y_prob, y_prob_thresh = 0.5):
 
     metrics = {}
 
+    metrics["y_prob_threshold"] = y_prob_thresh
+    metrics["tumor_abs_threshold"] = tumor_abs_threshold
     # Subset accuracy (Exact match)
     metrics["subset_accuracy"] = accuracy_score(y_true_onehot, y_pred)
 
@@ -464,6 +512,10 @@ def log_epoch_metrics(epoch, split_name, metrics, loss, output_path):
         log_str.append(f"  F1 Score (Macro) : {m_ml['f1_macro']:.4f}")
         log_str.append(f"  AUROC (Macro)    : {m_ml['auroc_macro']:.4f}")
         log_str.append(f"  AUPRC (Macro)    : {m_ml['auprc_macro']:.4f}")
+
+        log_str.append(f"\n-- THRESOLDS --")
+        log_str.append(f" y prob threshold : {m_ml['y_prob_threshold']:.4f}")
+        log_str.append(f" tumor abs threshold : {m_ml['tumor_abs_threshold']:.4f}")
 
     # =======================
     #  Imprimir en consola
