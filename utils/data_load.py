@@ -80,12 +80,7 @@ class RAM_WSI_Dataset(Dataset):
             self.len_subset = len(self.indices)
 
         # Transformaciones básicas
-        '''self.transform = T.Compose([
-            T.ToTensor(),
-            T.Resize((224, 224), antialias=True),
-            T.Normalize(mean=[0.5, 0.5, 0.5],
-                        std=[0.5, 0.5, 0.5])
-        ])'''
+        
         self.transform = T.Compose([
         T.Resize(size=224, interpolation=T.InterpolationMode.BICUBIC),
         T.CenterCrop(size=(224, 224)),

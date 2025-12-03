@@ -120,6 +120,7 @@ with open(paths['log_output_path'], "a") as f:
     f.write(f"Time for loading data : {time_load} \n")
 
 # =================== WEIGHTS CALCUALTION ===================
+print(" Preparing Class Weights and hyperpatameters ...")
 primary_weights = compute_class_weights(df_train['gleason_primary_mapped'])
 secondary_weights = compute_class_weights(df_train['gleason_secondary_mapped'])
 sum_weights = primary_weights + secondary_weights
@@ -142,6 +143,7 @@ no_improve = 0
 best_y_prob_threshold, best_tumor_abs_threshold = 0,0
 
 # =================== TRAINING ===================
+print("Starting Training ...")
 for epoch in range(args.epochs):
     print(f"\nEpoch {epoch}")
     with open(paths['output_file'], "a") as f:

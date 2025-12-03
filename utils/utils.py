@@ -344,7 +344,7 @@ def selecting_thresholds(model, val_loader, device, accelerator, loss_BCE, args)
                 best_t2 = t2
                 best_metrics = metrics
 
-    return val_metrics, val_loss ,best_t1, best_t2    
+    return best_metrics, val_loss ,best_t1, best_t2    
 
 def compute_metrics(y_true, y_pred):
     """

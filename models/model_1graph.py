@@ -103,8 +103,6 @@ class KEEPModel(PreTrainedModel):
 
 def get_keep_ia3_model(checkpoint_path= '/workspace/data/MODELS/model_keep/pytorch_model.bin', model_name = 'keep',pretrain=False):
     
-    
-    
     AutoConfig.register(model_name, KEEPConfig)
     AutoModel.register(KEEPConfig, KEEPModel)
     
