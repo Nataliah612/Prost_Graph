@@ -7,6 +7,7 @@ from sklearn.model_selection import train_test_split
 
 import os
 import gc
+import csv
 import time 
 import argparse
 
@@ -31,6 +32,7 @@ def parse_args():
     parser.add_argument("--inference",action="store_true",default=False, help="Usar una BBDD para hacer inferencia despues del entrenamiento.")
     parser.add_argument("--small_dataset",action="store_true",default=False, help="Usar un subset de la BBDD para el entrenamiento.")
     parser.add_argument("--pretrain",action="store_true",default=False, help="Preentrena capas del modelo fundacional KEEP.")
+    parser.add_argument("--random_subset",action="store_true",default=False, help="Entrenar en cada epoca con un subset aleatorio de los datos.")
 
     parser.add_argument("--results_path", type=str, default='/workspace/results', help="Ruta donde se guardaran los resultados")
 
@@ -72,6 +74,7 @@ os.makedirs(results_path, exist_ok=True)
 paths = {   'output_file': os.path.join(results_path, 'output.txt'),
             'plot_kfold_path': os.path.join(results_path, 'k_fold_plot.png'),
             'results_path': results_path,
+            'train_subset_indices_per_epoch_csv_path': os.path.join(results_path, 'train_subset_indices_per_epoch_csv_path'),
             'result_best_model_path':os.path.join(results_path, 'best_model'),
             'result_last_model_path': os.path.join(results_path, 'last_model'),
             'log_output_path':os.path.join(results_path, 'train_log_output.txt')}
@@ -83,7 +86,7 @@ model = torch.nn.SyncBatchNorm.convert_sync_batchnorm(model)
 # =================== LOADING DATA ===================
 print("Preparing DataSet PANDA ...")
 
-with open(paths['output_file'], "w") as f:
+with open(paths['log_output_path'], "w") as f:
         f.write(f"Creating Dataset SICAP \n")
 df_train = create_file_label_df(args.data_panda_patches, args.data_panda_path,small_dataset= args.small_dataset, NAME = 'PANDA')
 
@@ -103,7 +106,8 @@ if torch.cuda.is_available():
 
 inicio__load = time.time() 
 print("Loading embeddings for Training ...")
-train_loader = DataLoader(RAM_WSI_Dataset(df_train, train_idx, random_subsets= True), shuffle=True, **dl_kwargs)
+data_train = RAM_WSI_Dataset(df_train, train_idx, random_subsets= args.random_subset)
+train_loader = DataLoader(data_train, shuffle=True, **dl_kwargs)
 print("Loading embeddings for Validation ...")
 val_loader = DataLoader(RAM_WSI_Dataset(df_train, val_idx), shuffle=False, **dl_kwargs)
 print("Loading embeddings for Test ...")
@@ -112,7 +116,7 @@ fin__load = time.time()
 
 time_load = fin__load - inicio__load
 
-with open(paths['output_file'], "a") as f:
+with open(paths['log_output_path'], "a") as f:
     f.write(f"Time for loading data : {time_load} \n")
 
 # =================== WEIGHTS CALCUALTION ===================
@@ -148,7 +152,17 @@ for epoch in range(args.epochs):
     if accelerator.is_main_process:
         log_epoch_metrics(epoch, "Train", train_metrics, train_loss, paths['log_output_path'])
         save_metrics_to_csv(train_metrics, epoch=epoch,  filepath= os.path.join(paths['results_path'], "train_train_metrics.csv"))
-
+    
+    if args.random_subset:
+            current_indices = data_train.get_current_subset_indices()
+            if accelerator.is_main_process:
+                file_exists = os.path.isfile(paths['train_subset_indices_per_epoch_csv_path'])
+                with open(paths['train_subset_indices_per_epoch_csv_path'], mode='a', newline='') as f:
+                    writer = csv.writer(f)
+                    if not file_exists:
+                        writer.writerow(['Epoch','Indices'])
+                    writer.writerow([epoch, current_indices])
+            data_train.update_random_subset()
     # VALIDATION
     #val_metrics, val_loss = run_epoch(model, val_loader, device, accelerator, loss, None, mode='val', args=args)
     val_metrics, val_loss, y_prob_threshold, tumor_abs_threshold = selecting_thresholds(model, val_loader, device, accelerator,

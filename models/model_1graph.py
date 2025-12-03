@@ -161,7 +161,7 @@ def get_keep_ia3_model(checkpoint_path= '/workspace/data/MODELS/model_keep/pytor
     
     for name, param in ia3_model.named_parameters():
         if pretrain == True:
-            if "visual.blocks.23.attn.proj.ia3_l" or "visual.blocks.22.attn.proj.ia3_l" in name or "visual.blocks.21.attn.proj.ia3_l" in name or "visual.blocks.20.attn.proj.ia3_l" in name:#
+            if "visual.blocks.23.attn.proj.ia3_l" or "visual.blocks.22.attn.proj.ia3_l" in name or "visual.blocks.21.attn.proj.ia3_l" in name or "visual.blocks.20.attn.proj.ia3_l" in name or "visual.blocks.19.attn.proj.ia3_l" in name:#
             #if ".attn.proj.ia3_l"  in name :
                 param.requires_grad = True
             else:
