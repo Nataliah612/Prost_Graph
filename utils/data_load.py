@@ -67,7 +67,7 @@ class RAM_WSI_Dataset(Dataset):
         len_subset (int): Tamaño del subset aleatorio que se usará en cada época.
                           Si es mayor que el total, se ajusta automáticamente.
     """
-    def __init__(self, dataframe, indices, random_subsets=False, len_subset=1000):
+    def __init__(self, dataframe, indices, random_subsets=False, len_subset=500):
         gc.collect()
         self.dataframe = dataframe
         self.indices = list(indices)

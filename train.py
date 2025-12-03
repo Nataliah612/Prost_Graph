@@ -74,7 +74,7 @@ os.makedirs(results_path, exist_ok=True)
 paths = {   'output_file': os.path.join(results_path, 'output.txt'),
             'plot_kfold_path': os.path.join(results_path, 'k_fold_plot.png'),
             'results_path': results_path,
-            'train_subset_indices_per_epoch_csv_path': os.path.join(results_path, 'train_subset_indices_per_epoch_csv_path'),
+            'train_subset_indices_per_epoch_csv_path': os.path.join(results_path, 'train_subset_indices_per_epoch.csv'),
             'result_best_model_path':os.path.join(results_path, 'best_model'),
             'result_last_model_path': os.path.join(results_path, 'last_model'),
             'log_output_path':os.path.join(results_path, 'train_log_output.txt')}
