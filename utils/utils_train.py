@@ -170,7 +170,7 @@ def run_epoch(model, dataloader, device, accelerator,
         y_true_secondary=y_true2,
         y_pred_secondary=y_pred2,
         y_true_onehot=y_onehot,
-        y_probs=probs,y_prob_threshold = args.y_prob_thresh)
+        y_probs=probs, y_prob_thresh = args.y_prob_thresh)
     
     if mode == 'val':
         val_metrics, y_prob_threshold= selecting_prob_thresholds(y_true1, y_pred1, y_true2, y_pred2, y_onehot, probs)
@@ -198,7 +198,7 @@ def selecting_prob_thresholds(y_true1, y_pred1, y_true2, y_pred2, y_onehot, prob
             y_true_secondary=y_true2,
             y_pred_secondary=y_pred2,
             y_true_onehot=y_onehot,
-            y_probs=probs,y_prob_threshold = y_prob_threshold)
+            y_probs=probs,y_prob_thresh = y_prob_threshold)
 
         score_f1 = metrics['multilabel']["f1_macro"] 
         

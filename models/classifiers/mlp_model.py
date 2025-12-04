@@ -45,9 +45,7 @@ class model_mlp(nn.Module):
         for chunk in chunks:
             # Mover SOLO este trocito a GPU
             chunk_gpu = chunk.to(device, non_blocking=True)
-
             x_features = self.embedding(chunk_gpu) # EMBEDDING GLEASON GRADE
-
             x_class = self.classifier(x_features) # CLASIFICATOR GLEASON GRADE
             x_probs = torch.softmax(x_class, dim = 1)      # Activation function 
 
@@ -102,15 +100,14 @@ class attentionMIL_instance(nn.Module):
         return w_logits
 
 class MILArchitecture(nn.Module):
-    def __init__(self, classes, aggregation='max', L_value=None):
+    def __init__(self, classes, aggregation='attentionMIL', L_value=None):
         super().__init__()
         self.aggregation = aggregation
         self.L = L_value
         self.nClasses = len(classes)
-
-        if self.aggregation == 'attentionMIL':
-            assert self.L is not None, "L_value required for attentionMIL"
-            self.attentionModule = attentionMIL_instance(self.L)
+        
+        assert self.L is not None, "L_value required for attentionMIL"
+        self.attentionModule = attentionMIL_instance(self.L)
 
     def forward(self, patch_probs, patch_feats, lengths):
         """
@@ -119,12 +116,11 @@ class MILArchitecture(nn.Module):
         lengths: list[int] (n_parches por WSI), sum(lengths) == N_total
         Devuelve: Tensor (batch_size, C) con logits/score por WSI
         """
-        #assert patch_probs.dim() == 2
-        #assert patch_feats.dim() == 2
-
-        # Dividir por WSI
         probs_splits = torch.split(patch_probs, lengths, dim=0)
         feats_splits = torch.split(patch_feats, lengths, dim=0)
+
+        # for i, (p, f) in enumerate(zip(probs_splits, feats_splits)):
+        #     print(f"[MIL]  WSI {i} probs: {p.shape} feats: {f.shape}")
 
         wsis = []
         if self.aggregation == 'max':
@@ -145,6 +141,6 @@ class MILArchitecture(nn.Module):
         else:
             raise ValueError(f"Unknown aggregation: {self.aggregation}")
         
-        wsi_logits = torch.stack(wsis, dim=0)  
-        
-        return wsi_logits    
+        wsi_logits = torch.stack(wsis, dim=0)  #    
+    
+        return wsi_logits

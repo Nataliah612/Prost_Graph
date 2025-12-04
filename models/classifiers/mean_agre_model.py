@@ -48,16 +48,16 @@ class model_mean_aggre(nn.Module):
             # Mover SOLO este trocito a GPU
             chunk_gpu = chunk.to(device, non_blocking=True)
 
-            x_features = self.embedding(chunk_gpu) # EMBEDDING GLEASON GRADE
-
-            x_class = self.classifier(x_features) # CLASIFICATOR GLEASON GRADE
-            x_probs = torch.softmax(x_class, dim = 1)      # Activation function 
+            x_features = self.embedding(chunk_gpu)      # EMBEDDING GLEASON GRADE
+            x_class = self.classifier(x_features)       # CLASIFICATOR GLEASON GRADE
+            x_probs = torch.softmax(x_class, dim = 1)   # Activation function 
             
-            all_probs.append(x_probs)
+            all_probs.append(x_probs.squeeze())
 
         total_probs = torch.cat(all_probs, dim=0) 
         patchs_probs_list = list(torch.split(total_probs, lengths, dim=0))
-        wsi_logits = [torch.mean(probs, dim=0, keepdim=True) for probs in patchs_probs_list]
 
-        return wsi_logits, patchs_probs_list
+        wsi_logits = wsi_logits = torch.stack( [torch.mean(probs, dim=0, keepdim=True) for probs in patchs_probs_list], dim=0) 
+
+        return wsi_logits.squeeze(), patchs_probs_list
     

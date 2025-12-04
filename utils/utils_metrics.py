@@ -37,7 +37,7 @@ def compute_metrics(y_true, y_pred):
     }
 
 def compute_all_gleason_metrics(y_true_primary, y_pred_primary,
-                                y_true_secondary, y_pred_secondary, y_true_onehot=None,y_probs=None, y_prob_thresh=0.5, tumor_abs_threshold=0.05):
+                                y_true_secondary, y_pred_secondary, y_true_onehot=None,y_probs=None, y_prob_thresh=0.5):
     """
     Calcula las métricas para Gleason primario, secundario y global.
     
@@ -72,10 +72,10 @@ def compute_all_gleason_metrics(y_true_primary, y_pred_primary,
 
      # --- Multilabel ---
     if y_true_onehot is not None and y_probs is not None:
-        metrics["multilabel"] = compute_multilabel_metrics(y_true_onehot, y_probs, y_prob_thresh, tumor_abs_threshold)
+        metrics["multilabel"] = compute_multilabel_metrics(y_true_onehot, y_probs, y_prob_thresh)
 
     return metrics
-def compute_multilabel_metrics(y_true_onehot, y_prob, y_prob_thresh = 0.5, tumor_abs_threshold=0.05):
+def compute_multilabel_metrics(y_true_onehot, y_prob, y_prob_thresh = 0.5):
     """
     Métricas para clasificación multietiqueta.
 
@@ -94,8 +94,6 @@ def compute_multilabel_metrics(y_true_onehot, y_prob, y_prob_thresh = 0.5, tumor
 
     metrics = {}
 
-    metrics["y_prob_threshold"] = y_prob_thresh
-    metrics["tumor_abs_threshold"] = tumor_abs_threshold
     # Subset accuracy (Exact match)
     metrics["subset_accuracy"] = accuracy_score(y_true_onehot, y_pred)
 
