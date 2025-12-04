@@ -1,7 +1,6 @@
 import torch
 import torch.nn as nn
 
-
 class model_mean_aggre(nn.Module):
     def __init__(self, chunk_size=512):
         '''Para utilizar la atencion por parche se requiere de aprender sobre 512 caracteristicas (AttriMIL)'''
@@ -32,6 +31,7 @@ class model_mean_aggre(nn.Module):
         inputs_list = [t.to(device) for t in x]
 
         # 1) Concatenar todos los parches del batch
+        #mean_features_wsi = [torch.mean(t, dim = 0, keepdim=True) for t in inputs_list]
         lengths = [int(t.size(0)) for t in inputs_list] # Lista de N_patches por WSI, clave para reconstrucción de WSI
         
         if sum(lengths) == 0:
@@ -41,7 +41,6 @@ class model_mean_aggre(nn.Module):
 
         chunks = torch.split(all_patches, self.chunk_size, dim=0)
         
-        all_features = []
         all_probs = []
 
         # 4. Procesar chunk a chunk en GPU
@@ -53,14 +52,10 @@ class model_mean_aggre(nn.Module):
 
             x_class = self.classifier(x_features) # CLASIFICATOR GLEASON GRADE
             x_probs = torch.softmax(x_class, dim = 1)      # Activation function 
-
-            # Guardamos los resultados (son vectores pequeños, caben bien en GPU)
-            all_features.append(x_features)
+            
             all_probs.append(x_probs)
 
-        #patchs_probs_list = list(torch.split(x_probs, lengths, dim=0))
         total_probs = torch.cat(all_probs, dim=0) 
-
         patchs_probs_list = list(torch.split(total_probs, lengths, dim=0))
         wsi_logits = [torch.mean(probs, dim=0, keepdim=True) for probs in patchs_probs_list]
 

@@ -7,6 +7,8 @@ from tqdm import tqdm
 import sys 
 import math
 
+from torch.cuda.amp import autocast
+
 from models.keep_model import device
 from utils.utils_metrics import compute_all_gleason_metrics, compute_metrics
 
@@ -103,9 +105,11 @@ def run_epoch(model, dataloader, device, accelerator,
         y_onehot = torch.zeros(y.shape[0], 4, device=device)
         y_onehot.scatter_(1, y, 1)
 
+        with autocast(dtype=torch.float16):
+            wsi_prediction, patchs_prediction = model(inputs)
         # --- Forward ---
         # (El modelo mueve internamente los inputs al device)
-        wsi_prediction, patchs_prediction = model(inputs) # wsi_prediction: Tensor (B,4) , patchs_prediction: list of B tensors, cada uno (N_patches,4)
+        #wsi_prediction, patchs_prediction = model(inputs) # wsi_prediction: Tensor (B,4) , patchs_prediction: list of B tensors, cada uno (N_patches,4)
 
         # --- Cálculo de proporciones por WSI (media de probabilidades por parche) ---
         # Si algún WSI tuviera 0 parches, usamos vector ceros (Aunque eso debería evitarse)
@@ -172,7 +176,9 @@ def run_epoch(model, dataloader, device, accelerator,
         val_metrics, y_prob_threshold= selecting_prob_thresholds(y_true1, y_pred1, y_true2, y_pred2, y_onehot, probs)
         metrics_global, tumor_abs_threshold=selecting_abs_threshold(all_wsi_proportions,y_true1, y_true2)
         return metrics, epoch_loss, y_prob_threshold, tumor_abs_threshold
-    
+
+    if mode == 'test':
+        return metrics, epoch_loss,  wsi_prediction, patchs_prediction
     else:
         return metrics, epoch_loss
 

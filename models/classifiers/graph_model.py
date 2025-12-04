@@ -9,7 +9,6 @@ from torch_geometric.data import Batch
 from torch_geometric.utils import softmax
 
 import os
-import os
 os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "max_split_size_mb:128"
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")

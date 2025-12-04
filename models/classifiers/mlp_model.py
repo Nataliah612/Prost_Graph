@@ -1,6 +1,5 @@
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
    
 class model_mlp(nn.Module):
     def __init__(self, mil_aggregation_mode='attentionMIL',chunk_size=512):
@@ -27,7 +26,6 @@ class model_mlp(nn.Module):
     def forward(self, x):
         
         device = next(self.parameters()).device
-
         # Mover tensores al device
         inputs_list = [t.to(device) for t in x]
 
@@ -41,14 +39,13 @@ class model_mlp(nn.Module):
 
         chunks = torch.split(all_patches, self.chunk_size, dim=0)
         
-        all_features = []
-        all_probs = []
+        all_features,all_probs  = [], []
 
         # 4. Procesar chunk a chunk en GPU
         for chunk in chunks:
             # Mover SOLO este trocito a GPU
             chunk_gpu = chunk.to(device, non_blocking=True)
-           
+
             x_features = self.embedding(chunk_gpu) # EMBEDDING GLEASON GRADE
 
             x_class = self.classifier(x_features) # CLASIFICATOR GLEASON GRADE
@@ -56,7 +53,7 @@ class model_mlp(nn.Module):
 
             # Guardamos los resultados (son vectores pequeños, caben bien en GPU)
             all_features.append(x_features)
-            all_probs.append(x_probs)
+            all_probs.append(x_probs.squeeze())
 
         #patchs_probs_list = list(torch.split(x_probs, lengths, dim=0))
         total_feats = torch.cat(all_features, dim=0) # (N_total, embed_dim)
@@ -66,7 +63,7 @@ class model_mlp(nn.Module):
 
         patchs_probs_list = list(torch.split(total_probs, lengths, dim=0))
 
-        return wsi_logits, patchs_probs_list
+        return wsi_logits.squeeze(), patchs_probs_list
 
 class Attention(nn.Module):
     def __init__(self, L=512):
@@ -76,8 +73,7 @@ class Attention(nn.Module):
         self.branch_2 = nn.Sequential(nn.Linear(L, D), nn.Sigmoid())
         self.branch_3 = nn.Linear(D, 1)
 
-    def forward(self, x):
-        # x: (N, L)
+    def forward(self, x): # x: (N, L)
         xa = self.branch_1(x)
         xb = self.branch_2(x)
         A = xa * xb
@@ -123,19 +119,12 @@ class MILArchitecture(nn.Module):
         lengths: list[int] (n_parches por WSI), sum(lengths) == N_total
         Devuelve: Tensor (batch_size, C) con logits/score por WSI
         """
-        assert patch_probs.dim() == 2
-        assert patch_feats.dim() == 2
-
-        # print("\n[MIL] patch_probs:", patch_probs.shape)
-        # print("[MIL] patch_feats:", patch_feats.shape)
-        # print("[MIL] lengths:", lengths)
+        #assert patch_probs.dim() == 2
+        #assert patch_feats.dim() == 2
 
         # Dividir por WSI
         probs_splits = torch.split(patch_probs, lengths, dim=0)
         feats_splits = torch.split(patch_feats, lengths, dim=0)
-
-        # for i, (p, f) in enumerate(zip(probs_splits, feats_splits)):
-        #     print(f"[MIL]  WSI {i} probs: {p.shape} feats: {f.shape}")
 
         wsis = []
         if self.aggregation == 'max':

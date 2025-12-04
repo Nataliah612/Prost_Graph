@@ -106,6 +106,7 @@ class RAM_WSI_Dataset(Dataset):
 
             imgs_tensor = torch.stack([self.transform(Image.fromarray(img).convert('RGB')) for img in imgs])
             self.images.append(imgs_tensor)
+            #self.coords.append(torch.tensor(coords, dtype=torch.long))
             valid_indices.append(i)  # agregamos solo los que cargamos
 
         # Reemplazamos la lista original de índices por los válidos

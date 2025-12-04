@@ -10,7 +10,7 @@ from transformers import BitsAndBytesConfig, PretrainedConfig, PreTrainedModel, 
 from peft import get_peft_model,IA3Config #, LoraConfig
 
 from models.classifiers.graph_model import model_graph
-from models.classifiers.cnn_model import model_mlp
+from models.classifiers.mlp_model import model_mlp
 from models.classifiers.mean_agre_model import model_mean_aggre
 
 os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "max_split_size_mb:128"
@@ -94,12 +94,11 @@ class KEEPModel(PreTrainedModel):
             "text_features": text_features       
         }
 
-
-
 def get_keep_ia3_model(clasification_model = 'graph',pretrain=False):
 
     checkpoint_path= '/workspace/data/MODELS/model_keep/pytorch_model.bin'
     model_name = 'keep'
+    model_path = '/workspace/data/MODELS/model_keep/'
 
     AutoConfig.register(model_name, KEEPConfig)
     AutoModel.register(KEEPConfig, KEEPModel)
@@ -111,8 +110,6 @@ def get_keep_ia3_model(clasification_model = 'graph',pretrain=False):
         bnb_4bit_quant_type="nf4",              # Variante de tipo de cuqntificacion de 4 bits 
     )
     
-    model_path = '/workspace/data/MODELS/model_keep/'
-    checkpoint_path= '/workspace/data/MODELS/model_keep/pytorch_model.bin'
     config = AutoConfig.from_pretrained(model_path + 'config.json',
                                     trust_remote_code=True,             # Ejecuta el codio en remoto
                                     quantization_config=bnb_config,     # Introduce la configuracion de carga del modelo
@@ -146,7 +143,6 @@ def get_keep_ia3_model(clasification_model = 'graph',pretrain=False):
     ia3_model = get_peft_model(model, ia3_config)
    
     model = torch.compile(model) # Activar torch.compile si usas PyTorch 2.0+
-    # Congelar TODO menos IA3
     
     for name, param in ia3_model.named_parameters():
         if pretrain == True:
@@ -158,16 +154,18 @@ def get_keep_ia3_model(clasification_model = 'graph',pretrain=False):
             param.requires_grad = False
     ia3_model.print_trainable_parameters()
 
-    # 7. Envolver con tu modelo final
+    # Envolver con tu modelo final
     if clasification_model == 'graph':
-        model_class = model_graph
+        model_class = model_graph()
+
     elif clasification_model == 'mlp':
-        
-        model_class = model_mlp
+        model_class = model_mlp(mil_aggregation_mode='attentionMIL',chunk_size=512)
+
     elif clasification_model == 'mean_aggre':
-        model_class = model_mean_aggre
+        model_class = model_mean_aggre()
     else:
         print("Error: clasification_model no reconocido")
+
     net = KEEPForGleason(ia3_model, model_class)
    
     return net
@@ -176,7 +174,7 @@ class KEEPForGleason(nn.Module):
     def __init__(self, base_model, classifier_model):
         super().__init__()
         self.base = base_model
-        self.classifier = classifier_model()
+        self.classifier = classifier_model
         self.classifier.apply(weights_init)
 
     def forward(self, images):

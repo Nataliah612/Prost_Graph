@@ -34,14 +34,14 @@ def parse_args():
     parser.add_argument("--small_dataset",action="store_true",default=False, help="Usar un subset de la BBDD para el entrenamiento.")
     parser.add_argument("--pretrain",action="store_true",default=False, help="Preentrena capas del modelo fundacional KEEP.")
     parser.add_argument("--random_subset",action="store_true",default=False, help="Entrenar en cada epoca con un subset aleatorio de los datos.")
-    parser.add_argument("--model", type=str,default='graph', help="Modelos de clasificacion ('graph','mlp','mean_aggre').")
+    parser.add_argument("--model", type=str,default='mlp', help="Modelos de clasificacion ('graph','mlp','mean_aggre').")
 
     parser.add_argument("--results_path", type=str, default='/workspace/results', help="Ruta donde se guardaran los resultados")
 
     parser.add_argument("--batch_size", type=int, default=4, help="Tamaño de batch")
     parser.add_argument("--learning_rate", type=float, default=1e-4, help="Learning rate")
     parser.add_argument("--weight_decay", type=float, default=1e-5, help="Weight decay")
-    parser.add_argument("--momentum", type=float, default=0.9, help="Momentum")
+    parser.add_argument("--momentum", type=float, default=0.99, help="Momentum")
     parser.add_argument("--epochs", type=int, default=10, help="Número de épocas")
     parser.add_argument("--patience", type=int, default=20, help="Paciencia para early stopping")
 
@@ -60,7 +60,7 @@ print(" *Starting General Configuration ...")
 CUDA_LAUNCH_BLOCKING=1
 use_amp = torch.cuda.is_available()  # mixed precision if GPU available
 args = parse_args()
-
+args.small_dataset = True  # For testing purposes only
 # Multi-GPU accelerator init
 accelerator = Accelerator()
 device = accelerator.device
