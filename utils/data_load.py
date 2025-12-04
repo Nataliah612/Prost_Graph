@@ -20,7 +20,7 @@ def create_file_label_df(images_path, data_path, NAME='',small_dataset=False ,sl
     gleason_primary_list,gleason_secondary_list  = [], []
     df = pd.read_excel(data_path)
     
-    df = df.head(170) if small_dataset == True else df
+    df = df.head(200) if small_dataset == True else df
 
     wsis = [f for f in os.listdir(images_path) if f.endswith('.h5')]
     for f in tqdm(wsis, desc="Procesando WSIs", file=sys.stdout):
@@ -67,7 +67,7 @@ class RAM_WSI_Dataset(Dataset):
         len_subset (int): Tamaño del subset aleatorio que se usará en cada época.
                           Si es mayor que el total, se ajusta automáticamente.
     """
-    def __init__(self, dataframe, indices, random_subsets=False, len_subset=500):
+    def __init__(self, dataframe, indices, random_subsets=False, len_subset=1000):
         gc.collect()
         self.dataframe = dataframe
         self.indices = list(indices)

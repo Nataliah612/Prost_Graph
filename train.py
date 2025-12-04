@@ -14,9 +14,10 @@ import argparse
 from accelerate import Accelerator
 
 # =============== IMPORT FUNCIONES ======================
-from models.model_1graph import get_keep_ia3_model
+from models.keep_model import get_keep_ia3_model
 from utils.data_load import create_file_label_df, RAM_WSI_Dataset, collate_fn
-from utils.utils import run_epoch, compute_class_weights, set_multiple_seed, log_epoch_metrics, save_metrics_to_csv, selecting_thresholds
+from utils.utils_train import run_epoch, compute_class_weights, set_multiple_seed
+from utils.utils_metrics import log_epoch_metrics, save_metrics_to_csv
 
 os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "max_split_size_mb:128"
 gc.collect()
@@ -33,6 +34,7 @@ def parse_args():
     parser.add_argument("--small_dataset",action="store_true",default=False, help="Usar un subset de la BBDD para el entrenamiento.")
     parser.add_argument("--pretrain",action="store_true",default=False, help="Preentrena capas del modelo fundacional KEEP.")
     parser.add_argument("--random_subset",action="store_true",default=False, help="Entrenar en cada epoca con un subset aleatorio de los datos.")
+    parser.add_argument("--model", type=str,default='graph', help="Modelos de clasificacion ('graph','mlp','mean_aggre').")
 
     parser.add_argument("--results_path", type=str, default='/workspace/results', help="Ruta donde se guardaran los resultados")
 
@@ -54,6 +56,7 @@ def parse_args():
     return parser.parse_args()
 
 # =================== GENERAL CONFIGURACION ===================
+print(" *Starting General Configuration ...")
 CUDA_LAUNCH_BLOCKING=1
 use_amp = torch.cuda.is_available()  # mixed precision if GPU available
 args = parse_args()
@@ -66,7 +69,8 @@ torch.cuda.empty_cache()
 set_multiple_seed(args.seed)
 
 # =================== PATHS DEFINITION ===================
-name = f"try_{args.learning_rate}_{args.batch_size}_{args.epochs}_opt_threshold"
+print("*Defining Paths ...")
+name = f"try_{args.model}_{args.learning_rate}_{args.batch_size}_{args.epochs}_{args.pretrain}"
 
 results_path = os.path.join(args.results_path, name)
 os.makedirs(results_path, exist_ok=True)
@@ -80,11 +84,12 @@ paths = {   'output_file': os.path.join(results_path, 'output.txt'),
             'log_output_path':os.path.join(results_path, 'train_log_output.txt')}
 
 # =================== MODEL CONFIGURATION ===================
-model = get_keep_ia3_model(pretrain=args.pretrain).to(device)
+print("*Preparing Model ...")
+model = get_keep_ia3_model(clasification_model = args.model,pretrain=args.pretrain).to(device)
 model = torch.nn.SyncBatchNorm.convert_sync_batchnorm(model)
 
 # =================== LOADING DATA ===================
-print("Preparing DataSet PANDA ...")
+print("*Preparing DataSet PANDA ...")
 
 with open(paths['log_output_path'], "w") as f:
         f.write(f"Creating Dataset SICAP \n")
@@ -120,12 +125,13 @@ with open(paths['log_output_path'], "a") as f:
     f.write(f"Time for loading data : {time_load} \n")
 
 # =================== WEIGHTS CALCUALTION ===================
-print(" Preparing Class Weights and hyperpatameters ...")
+print("* Preparing Class Weights and hyperpatameters ...")
 primary_weights = compute_class_weights(df_train['gleason_primary_mapped'])
 secondary_weights = compute_class_weights(df_train['gleason_secondary_mapped'])
 sum_weights = primary_weights + secondary_weights
 
 # =================== TRAINING PARAMETHERS ===================
+print("* Preparing Training hyperparamethers ...")
 loss = nn.BCELoss(weight=sum_weights) #WithLogitsLoss(pos_weight=sum_weights) 
 
 optimizer = optim.AdamW(model.parameters(), lr=args.learning_rate) #weight_decay=1e-2
@@ -143,7 +149,7 @@ no_improve = 0
 best_y_prob_threshold, best_tumor_abs_threshold = 0,0
 
 # =================== TRAINING ===================
-print("Starting Training ...")
+print("* Starting Training ...")
 for epoch in range(args.epochs):
     print(f"\nEpoch {epoch}")
     with open(paths['output_file'], "a") as f:
@@ -166,9 +172,8 @@ for epoch in range(args.epochs):
                     writer.writerow([epoch, current_indices])
             data_train.update_random_subset()
     # VALIDATION
-    #val_metrics, val_loss = run_epoch(model, val_loader, device, accelerator, loss, None, mode='val', args=args)
-    val_metrics, val_loss, y_prob_threshold, tumor_abs_threshold = selecting_thresholds(model, val_loader, device, accelerator,
-                                                                                        loss, args)
+    val_metrics, val_loss,y_prob_threshold, tumor_abs_threshold = run_epoch(model, val_loader, device, accelerator, loss, None, mode='val', args=args)
+                                                                                    
     print("Selected thresholds - y_prob_threshold:", y_prob_threshold, " tumor_abs_threshold:", tumor_abs_threshold, flush=True)
         
     if accelerator.is_main_process:
