@@ -12,7 +12,19 @@ from torch.cuda.amp import autocast
 from models.keep_model import device
 from utils.utils_metrics import compute_all_gleason_metrics, compute_metrics
 
+import torch
+import torch.nn as nn
+import os
+import pandas as pd
+import random
+import numpy as np
+import sys
+import math
 
+from tqdm import tqdm
+
+from safetensors.torch import load_file as load_safetensors
+    
 def set_multiple_seed(seed: int = 42, deterministic: bool = True):
     """
     Fija las semillas para reproducibilidad en Python, NumPy y PyTorch.
@@ -45,6 +57,7 @@ def set_multiple_seed(seed: int = 42, deterministic: bool = True):
     
     print(f"[INFO] Semilla fijada en {seed} (deterministic={deterministic})")
 
+
 def compute_class_weights(labels):
     labels = torch.tensor(labels)
     num_classes = 4
@@ -55,219 +68,39 @@ def compute_class_weights(labels):
     
     return weights.to(dtype=torch.float, device=device)
 
-def run_epoch(model, dataloader, device, accelerator, 
-              loss_BCE, optimizer=None, 
-              args=None, mode="train"):
+def log_barrier(z: torch.Tensor, t: float = 5.0):
     """
-    Ejecuta una época completa (train, val o test) y devuelve métricas y pérdida media.
-
+       Calcula la pérdida de barrera logarítmica para una restricción z <= 0.
+    
     Args:
-        model: modelo PyTorch.
-        dataloader: iterable de batches (inputs, labels).
-        device: dispositivo ('cuda' o 'cpu').
-        accelerator: objeto de aceleración de HuggingFace.
-        loss_BCE: función de pérdida binaria (nn.BCELoss).
-        optimizer: optimizador (solo requerido si mode='train').
-        args: argumentos con alpha_pe y alpha_pc.
-        mode (str): 'train', 'val' o 'test'.
-
+        z (torch.Tensor): Valor de la restricción.
+        t (float): Parámetro de suavizado.
+    
     Returns:
-        dict: métricas calculadas.
-        float: pérdida media de la época.
+        torch.Tensor: Pérdida de barrera logarítmica.
     """
-    assert mode in ["train", "val", "test"], "mode debe ser 'train', 'val' o 'test'."
+    # Normalizar shape y device
+    z = z.view(-1)  
+    device = z.device
+    dtype = z.dtype
 
-    # Acumuladores
-    all_y_true_primary, all_y_true_secondary = [], []
-    all_y_pred_primary, all_y_pred_secondary = [], []
-    all_probs, all_y_true_onehot = [],[]
-    all_wsi_proportions = []
+    eps = 1e-12
+    thresh = -1.0 / (t ** 2)
 
-    total_loss_sum = 0.0
-    total_seen = torch.tensor(0, device=device)
+    # Máscara (torch.bool)
+    mask = z <= thresh
 
-    # Modo del modelo
-    model.train() if mode == "train" else model.eval()
+    # Rama 1: -log(-z)/t  (asegurar -z > eps)
+    #neg_z = torch.clamp(-z, min=eps)
+    branch1 = -torch.log(-z) / t 
 
-    # Desactivar gradientes si no es entrenamiento
-    torch.set_grad_enabled(mode == "train")
-    
-    for inputs, y in tqdm(dataloader, desc=f"{mode.upper()}", disable=not accelerator.is_local_main_process, file=sys.stdout):
-        # inputs: list of tensors [N_patches, C, H, W]
-        # y: tensor [batch, 2]
+    # Rama 2: t*z + const  (const calculado como tensor en mismo device/dtype)
+    c_val = -math.log(1.0 / (t ** 2))/t + 1.0 / t
+    c = torch.tensor(c_val, device=device, dtype=dtype)
+    branch2 = t * z + c
 
-        # Mover etiquetas al device
-        y_primary = y[:, 0].to(device)
-        y_secondary = y[:, 1].to(device)
-        y = y.to(device)
-
-        # One-hot multi-label (primary + secondary)
-        y_onehot = torch.zeros(y.shape[0], 4, device=device)
-        y_onehot.scatter_(1, y, 1)
-
-        with autocast(dtype=torch.float16):
-            wsi_prediction, patchs_prediction = model(inputs)
-        # --- Forward ---
-        # (El modelo mueve internamente los inputs al device)
-        #wsi_prediction, patchs_prediction = model(inputs) # wsi_prediction: Tensor (B,4) , patchs_prediction: list of B tensors, cada uno (N_patches,4)
-
-        # --- Cálculo de proporciones por WSI (media de probabilidades por parche) ---
-        # Si algún WSI tuviera 0 parches, usamos vector ceros (Aunque eso debería evitarse)
-        wsi_proportions = torch.stack([
-            p.mean(dim=0) if p.numel() > 0 else torch.zeros(wsi_prediction.size(1), device=wsi_prediction.device)
-            for p in patchs_prediction
-        ], dim=0)  # (B,4)
-    
-        # --- Cálculo de pérdidas ---
-        loss = loss_BCE(wsi_prediction, y_onehot)
-        loss_pe_pc = loss_restrictions(wsi_proportions, args.alpha_pe, args.alpha_pc)
-        total_loss = loss + loss_pe_pc
-
-        # --- Backpropagation ---
-        if mode == "train":
-            optimizer.zero_grad()
-            accelerator.backward(total_loss)
-            accelerator.clip_grad_norm_(model.parameters(), max_norm=1.0)
-            optimizer.step()
-
-        # --- Acumulación de pérdidas ---
-        batch_sz = len(inputs)
-        total_seen += batch_sz
-        total_loss_sum += accelerator.gather(total_loss.detach() * batch_sz).sum().item()
-
-        # --- Predicciones (selección de primary/secondary a partir de proporciones) ---
-        if mode =='val':
-            all_wsi_proportions.append(wsi_proportions.detach().cpu())
-                           
-        pred_primary, pred_secondary = select_gleason_grades_from_batch_proportions(wsi_proportions, args.tumor_abs_thresh)
-
-        # --- Probabilidades asociadas ---
-        probs = wsi_prediction.detach().cpu()
-        # --- Acumuladores para métricas ---
-        all_y_true_primary.append(y_primary.detach().cpu())
-        all_y_true_secondary.append(y_secondary.detach().cpu())
-        all_y_pred_primary.append(pred_primary.detach().cpu())
-        all_y_pred_secondary.append(pred_secondary.detach().cpu())
-        all_y_true_onehot.append(y_onehot.detach().cpu())
-        all_probs.append(probs)
-
-    # --- Métricas de la época ---
-    total_seen = accelerator.reduce(total_seen, reduction="sum").item()
-    epoch_loss = total_loss_sum / total_seen
-
-    # Concatenar todo
-    y_true1 = torch.cat(all_y_true_primary).numpy()
-    y_true2 = torch.cat(all_y_true_secondary).numpy()
-    y_pred1 = torch.cat(all_y_pred_primary).numpy()
-    y_pred2 = torch.cat(all_y_pred_secondary).numpy()
-    probs = torch.cat(all_probs).numpy()
-    y_onehot = torch.cat(all_y_true_onehot).numpy()
-
-    # --- Calcular métricas ---
-    metrics = compute_all_gleason_metrics(
-        y_true_primary=y_true1,
-        y_pred_primary=y_pred1,
-        y_true_secondary=y_true2,
-        y_pred_secondary=y_pred2,
-        y_true_onehot=y_onehot,
-        y_probs=probs, y_prob_thresh = args.y_prob_thresh)
-    
-    if mode == 'val':
-        val_metrics, y_prob_threshold= selecting_prob_thresholds(y_true1, y_pred1, y_true2, y_pred2, y_onehot, probs)
-        metrics_global, tumor_abs_threshold=selecting_abs_threshold(all_wsi_proportions,y_true1, y_true2)
-        return metrics, epoch_loss, y_prob_threshold, tumor_abs_threshold
-
-    if mode == 'test':
-        return metrics, epoch_loss,  wsi_prediction, patchs_prediction
-    else:
-        return metrics, epoch_loss
-
-def selecting_prob_thresholds(y_true1, y_pred1, y_true2, y_pred2, y_onehot, probs):
-    # Primero obtenemos un forward completo
-
-    best_score1= -1
-    best_y_prob_threshold = None
-    best_metrics ={}
-    thresh_list = [0.1,0.2,0.3,0.4,0.5, 0.6]
-
-    for y_prob_threshold in thresh_list:
-
-        metrics = compute_all_gleason_metrics(
-            y_true_primary=y_true1,
-            y_pred_primary=y_pred1,
-            y_true_secondary=y_true2,
-            y_pred_secondary=y_pred2,
-            y_true_onehot=y_onehot,
-            y_probs=probs,y_prob_thresh = y_prob_threshold)
-
-        score_f1 = metrics['multilabel']["f1_macro"] 
-        
-        if score_f1 > best_score1 :
-            best_score1 = score_f1
-            best_y_prob_threshold = y_prob_threshold
-            best_metrics = metrics
-
-    return best_metrics, best_y_prob_threshold 
-
-def selecting_abs_threshold(all_wsi_proportions, y_primary, y_secondary):
-
-    # Concatenar proporciones
-    all_proportions = torch.cat(all_wsi_proportions) # Necesitas agregar all_wsi_proportions a tus listas de acumulación.
-
-    best_val_acc = 0
-    thresh_list = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6] 
-
-    for i in thresh_list:
-        pred_primary, pred_secondary = select_gleason_grades_from_batch_proportions(all_proportions, i)
-        y_true_global = y_primary + y_secondary
-        y_pred_global = pred_primary + pred_secondary
-        metrics_global = compute_metrics(y_true_global, y_pred_global)
-
-        if metrics_global['accuracy'] >= best_val_acc:
-            best_val_acc = metrics_global['accuracy']
-            tumor_abs_threshold = i
-    return metrics_global, tumor_abs_threshold
-            
-def select_gleason_grades_from_batch_proportions(proportions, tumor_abs_thresh=0.05):
-    """
-    Selecciona grado primario y secundario a partir de un tensor de proporciones.
-
-    Args:
-        proportions: tensor [Batch_size, 4], columnas [p0, p3, p4, p5]
-        tumor_abs_thresh: umbral mínimo de probabilidad tumoral para considerar WSI como cáncer
-
-    Returns:
-        primary_grade: tensor [Batch_size], grado primario 
-        secondary_grade: tensor [Batch_size], grado secundario
-    """
-
-    device = proportions.device
-
-    # Extraer proporciones tumorales: columnas 1,2,3 -> p3, p4, p5
-    tumor_probs = proportions[:, 1:]  # shape: [Batch_size, 3]
-    tumor_classes = torch.tensor([1, 2, 3], device=device)
-
-    # Orden descendente por probabilidad tumoral
-    sorted_vals, sorted_idx = torch.sort(tumor_probs, dim=1, descending=True)
-    primary_idx = sorted_idx[:, 0]
-    secondary_idx = sorted_idx[:, 1]
-    primary_vals = sorted_vals[:, 0]
-    secondary_vals = sorted_vals[:, 1]
-
-    # Inicialización de grados según las clases tumorales
-    primary_grade = tumor_classes[primary_idx]    # shape: [Batch_size]
-    secondary_grade = tumor_classes[secondary_idx]  # shape: [Batch_size]
-
-    # Casos donde todas las proporciones tumorales son muy bajas -> benigno
-    benign_mask = primary_vals < tumor_abs_thresh
-    primary_grade[benign_mask] = 0
-    secondary_grade[benign_mask] = 0
-
-    # Patrones secundarios muy débiles -> se iguala al primario
-    single_mask = (secondary_vals < tumor_abs_thresh) | (secondary_vals < 0.3 * primary_vals)
-    secondary_grade[single_mask] = primary_grade[single_mask]
-
-    return primary_grade, secondary_grade
+    out = torch.where(mask, branch1, branch2)  
+    return out.sum()  
 
 def loss_restrictions(wsi_proportions: torch.Tensor, alpha_pe: float, alpha_pc: float, t_pe: float = 15.0, t_pc: float = 5.0):
     """
@@ -316,37 +149,240 @@ def loss_restrictions(wsi_proportions: torch.Tensor, alpha_pe: float, alpha_pc: 
 
     return alpha_pe * loss_pe + alpha_pc * loss_pc
 
-def log_barrier(z: torch.Tensor, t: float = 5.0):
+
+def select_gleason_grades_from_batch_proportions(proportions, tumor_abs_thresh=0.05):
     """
-       Calcula la pérdida de barrera logarítmica para una restricción z <= 0.
-    
+    Selecciona grado primario y secundario a partir de un tensor de proporciones.
+
     Args:
-        z (torch.Tensor): Valor de la restricción.
-        t (float): Parámetro de suavizado.
-    
+        proportions: tensor [Batch_size, 4], columnas [p0, p3, p4, p5]
+        tumor_abs_thresh: umbral mínimo de probabilidad tumoral para considerar WSI como cáncer
+
     Returns:
-        torch.Tensor: Pérdida de barrera logarítmica.
+        primary_grade: tensor [Batch_size], grado primario 
+        secondary_grade: tensor [Batch_size], grado secundario
     """
-    # Normalizar shape y device
-    z = z.view(-1)  
-    device = z.device
-    dtype = z.dtype
 
-    eps = 1e-12
-    thresh = -1.0 / (t ** 2)
+    device = proportions.device
 
-    # Máscara (torch.bool)
-    mask = z <= thresh
+    # Extraer proporciones tumorales: columnas 1,2,3 -> p3, p4, p5
+    tumor_probs = proportions[:, 1:]  # shape: [Batch_size, 3]
+    tumor_classes = torch.tensor([1, 2, 3], device=device)
 
-    # Rama 1: -log(-z)/t  (asegurar -z > eps)
-    neg_z = torch.clamp(-z, min=eps)
-    branch1 = -torch.log(neg_z) / t 
+    # Orden descendente por probabilidad tumoral
+    sorted_vals, sorted_idx = torch.sort(tumor_probs, dim=1, descending=True)
+    primary_idx = sorted_idx[:, 0]
+    secondary_idx = sorted_idx[:, 1]
+    primary_vals = sorted_vals[:, 0]
+    secondary_vals = sorted_vals[:, 1]
 
-    # Rama 2: t*z + const  (const calculado como tensor en mismo device/dtype)
-    c_val = -math.log(1.0 / (t ** 2)) + 1.0 / t
-    c = torch.tensor(c_val, device=device, dtype=dtype)
-    branch2 = t * z + c
+    # Inicialización de grados según las clases tumorales
+    primary_grade = tumor_classes[primary_idx]    # shape: [Batch_size]
+    secondary_grade = tumor_classes[secondary_idx]  # shape: [Batch_size]
 
-    out = torch.where(mask, branch1, branch2)  
-    return out.sum() 
-  
+    # Casos donde todas las proporciones tumorales son muy bajas -> benigno
+    benign_mask = primary_vals < tumor_abs_thresh
+    primary_grade[benign_mask] = 0
+    secondary_grade[benign_mask] = 0
+
+    # Patrones secundarios muy débiles -> se iguala al primario
+    single_mask = (secondary_vals < tumor_abs_thresh) | (secondary_vals < 0.3 * primary_vals)
+    secondary_grade[single_mask] = primary_grade[single_mask]
+
+    return primary_grade, secondary_grade
+
+def run_epoch(model, dataloader, device, accelerator, 
+              loss_BCE, optimizer=None, 
+              args=None, mode="train",inference_heatmap = False,
+              y_prob_threshold=None, tumor_abs_threshold=None, alpha_pe=0, alpha_pc=0):
+    """
+    Ejecuta una época completa (train, val o test) y devuelve métricas y pérdida media.
+
+    Args:
+        model: modelo PyTorch.
+        dataloader: iterable de batches (inputs, labels).
+        device: dispositivo ('cuda' o 'cpu').
+        accelerator: objeto de aceleración de HuggingFace.
+        loss_BCE: función de pérdida binaria (nn.BCELoss).
+        optimizer: optimizador (solo requerido si mode='train').
+        args: argumentos con alpha_pe y alpha_pc.
+        mode (str): 'train', 'val' o 'test'.
+        y_prob_threshold (float): umbral de probabilidad para clasificación multilabel. Si es None, se usa args.y_prob_threshold.
+        tumor_abs_threshold (float): umbral absoluto de proporción tumoral. Si es None, se usa args.tumor_abs_threshold.
+
+    Returns:
+        dict: métricas calculadas.
+        float: pérdida media de la época.
+    """
+    assert mode in ["train", "val", "test"], "mode debe ser 'train', 'val' o 'test'."
+
+    # Acumuladores
+    all_y_true_primary, all_y_true_secondary = [], []
+    all_y_pred_primary, all_y_pred_secondary = [], []
+    all_probs, all_y_true_onehot = [],[]
+    all_wsi_proportions = []
+
+    test_output = []
+    total_loss_sum = 0.0
+    total_seen = torch.tensor(0, device=device)
+    
+    # Umbrales por defecto si no se proporcionan
+    if y_prob_threshold is None and tumor_abs_threshold is None:
+        y_prob_threshold = args.y_prob_threshold
+        tumor_abs_threshold = args.tumor_abs_threshold
+    if alpha_pc is None and alpha_pe is None:
+        alpha_pe = args.alpha_pe
+        alpha_pc = args.alpha_pc
+
+    # Modo del modelo
+    model.train() if mode == "train" else model.eval()
+
+    # Desactivar gradientes si no es entrenamiento
+    torch.set_grad_enabled(mode == "train")
+    
+    for batch_info in tqdm(dataloader, desc=f"{mode.upper()}", disable=not accelerator.is_local_main_process, file=sys.stdout):
+        # inputs: list of tensors [N_patches, C, H, W]
+        # y: tensor [batch, 2]
+        if inference_heatmap:
+            patch_id, inputs, y, coords = batch_info
+        else:
+            inputs, y = batch_info
+
+        # Mover etiquetas al device
+        y_primary = y[:, 0].to(device)
+        y_secondary = y[:, 1].to(device)
+        y = y.to(device)
+
+        # One-hot multi-label (primary + secondary)
+        y_onehot = torch.zeros(y.shape[0], 4, device=device)
+        y_onehot.scatter_(1, y, 1)
+
+        # --- Forward ---
+        # (El modelo mueve internamente los inputs al device)
+        wsi_prediction, patchs_prediction, weight_tensor = model(inputs) # wsi_prediction: Tensor (B,4) , patchs_prediction: list of B tensors, cada uno (N_patches,4)
+
+        # --- Cálculo de proporciones por WSI (media de probabilidades por parche) ---
+        # Si algún WSI tuviera 0 parches, usamos vector ceros (Aunque eso debería evitarse)
+        wsi_proportions = torch.stack([
+            p.mean(dim=0) if p.numel() > 0 else torch.zeros(wsi_prediction.size(1), device=wsi_prediction.device)
+            for p in patchs_prediction
+        ], dim=0)  # (B,4)
+
+        # --- Cálculo de pérdidas ---
+        loss = loss_BCE(wsi_prediction, y_onehot)
+        loss_pe_pc = loss_restrictions(wsi_proportions, alpha_pe, alpha_pc)
+        total_loss = loss + loss_pe_pc
+
+        # --- Backpropagation ---
+        if mode == "train":
+            optimizer.zero_grad()
+            accelerator.backward(total_loss)
+            accelerator.clip_grad_norm_(model.parameters(), max_norm=1.0)
+            optimizer.step()
+
+        # --- Acumulación de pérdidas ---
+        batch_sz = len(inputs)
+        total_seen += batch_sz
+        total_loss_sum += accelerator.gather(total_loss.detach() * batch_sz).sum().item()
+
+        # --- Predicciones (selección de primary/secondary a partir de proporciones) ---
+        if mode =='val':
+            all_wsi_proportions.append(wsi_proportions.detach().cpu())
+                           
+        pred_primary, pred_secondary = select_gleason_grades_from_batch_proportions(wsi_proportions, tumor_abs_threshold)
+
+        # --- Probabilidades asociadas ---
+        probs = wsi_prediction.detach().cpu()
+        # --- Acumuladores para métricas ---
+        all_y_true_primary.append(y_primary.detach().cpu())
+        all_y_true_secondary.append(y_secondary.detach().cpu())
+        all_y_pred_primary.append(pred_primary.detach().cpu())
+        all_y_pred_secondary.append(pred_secondary.detach().cpu())
+        all_y_true_onehot.append(y_onehot.detach().cpu())
+        all_probs.append(probs)
+
+        if inference_heatmap:
+            for i in range(batch_sz):
+                slide_out = {
+                    "slide_id": patch_id[i],
+                    "coords": coords[i],
+                    "scores": torch.argmax(patchs_prediction[i], dim=1).cpu().numpy(), 
+                    }
+                test_output.append(slide_out)
+
+    # --- Métricas de la época ---
+    total_seen = accelerator.reduce(total_seen, reduction="sum").item()
+    epoch_loss = total_loss_sum / total_seen
+
+    # Concatenar todo
+    y_true1 = torch.cat(all_y_true_primary).numpy()
+    y_true2 = torch.cat(all_y_true_secondary).numpy()
+    y_pred1 = torch.cat(all_y_pred_primary).numpy()
+    y_pred2 = torch.cat(all_y_pred_secondary).numpy()
+    probs = torch.cat(all_probs).numpy()
+    y_onehot = torch.cat(all_y_true_onehot).numpy()
+
+    # --- Calcular métricas ---
+    metrics = compute_all_gleason_metrics(
+        y_true_primary=y_true1,
+        y_pred_primary=y_pred1,
+        y_true_secondary=y_true2,
+        y_pred_secondary=y_pred2,
+        y_true_onehot=y_onehot,
+        y_probs=probs,y_prob_threshold = y_prob_threshold)
+    
+    if mode == 'val':
+        val_metrics, y_prob_threshold= selecting_prob_thresholds(y_true1, y_pred1, y_true2, y_pred2, y_onehot, probs)
+        metrics_global, tumor_abs_threshold=selecting_abs_threshold(all_wsi_proportions,y_true1, y_true2)
+        return metrics, epoch_loss, y_prob_threshold, tumor_abs_threshold
+    if inference_heatmap:
+        test_output= pd.DataFrame(test_output)
+        return metrics, epoch_loss, test_output
+    else:
+        return metrics, epoch_loss
+
+def selecting_prob_thresholds(y_true1, y_pred1, y_true2, y_pred2, y_onehot, probs):
+    # Primero obtenemos un forward completo
+
+    best_score1= -1
+    best_y_prob_threshold = None
+    best_metrics ={}
+    thresh_list = [0.1, 0.15, 0.2, 0.25, 0.3, 0.35, 0.4, 0.45, 0.5, 0.55, 0.6]
+
+    for y_prob_threshold in thresh_list:
+
+        metrics = compute_all_gleason_metrics(
+            y_true_primary=y_true1,
+            y_pred_primary=y_pred1,
+            y_true_secondary=y_true2,
+            y_pred_secondary=y_pred2,
+            y_true_onehot=y_onehot,
+            y_probs=probs,y_prob_threshold = y_prob_threshold)
+
+        score_f1 = metrics['multilabel']["f1_macro"] 
+        
+        if score_f1 > best_score1 :
+            best_score1 = score_f1
+            best_y_prob_threshold = y_prob_threshold
+            best_metrics = metrics
+
+    return best_metrics, best_y_prob_threshold 
+
+def selecting_abs_threshold(all_wsi_proportions, y_primary, y_secondary):
+
+    # Concatenar proporciones
+    all_proportions = torch.cat(all_wsi_proportions) # Necesitas agregar all_wsi_proportions a tus listas de acumulación.
+
+    best_val_f1 = 0
+    thresh_list = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6] 
+
+    for i in thresh_list:
+        pred_primary, pred_secondary = select_gleason_grades_from_batch_proportions(all_proportions, i)
+        y_true_global = y_primary + y_secondary
+        y_pred_global = pred_primary + pred_secondary
+        metrics_global = compute_metrics(y_true_global, y_pred_global)
+
+        if metrics_global['accuracy'] >= best_val_f1:
+            best_val_f1 = metrics_global['accuracy']
+            tumor_abs_threshold = i
+    return metrics_global, tumor_abs_threshold
