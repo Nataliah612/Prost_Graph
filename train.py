@@ -15,7 +15,7 @@ from accelerate import Accelerator
 
 # =============== IMPORT FUNCIONES ======================
 from models.keep_model import get_keep_ia3_model
-from utils.data_load import create_file_label_df, RAM_WSI_Dataset, collate_fn
+from utils.data_load import create_file_label_df, WSI_Dataset, collate_fn
 from utils.utils_train import run_epoch, compute_class_weights, set_multiple_seed
 from utils.utils_metrics import log_epoch_metrics, save_metrics_to_csv
 
