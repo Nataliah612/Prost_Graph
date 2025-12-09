@@ -208,10 +208,6 @@ for epoch in range(args.epochs):
 
 # =================== TEST ===================
 print(f' FINALIZADO EL ENTRENAMIENTO ')
-test_metrics, test_loss = run_epoch(model, test_loader, device, accelerator, loss, None, mode='test',args=args)   
-
-accelerator.wait_for_everyone()
-    
 # Cargar el estado completo guardado por accelerate, result_best_model_path es la carpeta creada por save_state
 try:
     accelerator.load_state(paths['result_best_model_path'])
@@ -219,6 +215,10 @@ try:
 except Exception as e:
     print(f"Error cargando checkpoint de accelerate: {e}")
 
+test_metrics, test_loss = run_epoch(model, test_loader, device, accelerator, loss, None, mode='test',args=args)   
+
+accelerator.wait_for_everyone()
+    
 if accelerator.is_main_process:
     log_epoch_metrics(epoch, "Test", test_metrics, test_loss, paths['log_output_path'])
     save_metrics_to_csv(test_metrics, epoch=epoch,  filepath= os.path.join(paths['results_path'], "test_metrics.csv"))
