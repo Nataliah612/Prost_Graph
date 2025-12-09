@@ -111,12 +111,12 @@ if torch.cuda.is_available():
 
 inicio__load = time.time() 
 print("Loading embeddings for Training ...")
-data_train = RAM_WSI_Dataset(df_train, train_idx, random_subsets= args.random_subset)
+data_train = WSI_Dataset(df_train, train_idx, random_subsets= args.random_subset)
 train_loader = DataLoader(data_train, shuffle=True, **dl_kwargs)
 print("Loading embeddings for Validation ...")
-val_loader = DataLoader(RAM_WSI_Dataset(df_train, val_idx), shuffle=False, **dl_kwargs)
+val_loader = DataLoader(WSI_Dataset(df_train, val_idx), shuffle=False, **dl_kwargs)
 print("Loading embeddings for Test ...")
-test_loader = DataLoader(RAM_WSI_Dataset(df_train, test_idx), shuffle=False, **dl_kwargs)
+test_loader = DataLoader(WSI_Dataset(df_train, test_idx), shuffle=False, **dl_kwargs)
 fin__load = time.time()
 
 time_load = fin__load - inicio__load
@@ -238,7 +238,7 @@ if args.inference == True:
     df_test['gleason_score'] = df_test['gleason_score'].astype(int)
 
     print("Loading embeddings for Inference ...")
-    inference_loader = DataLoader(RAM_WSI_Dataset(df_test, df_test.index), shuffle=False, **dl_kwargs)
+    inference_loader = DataLoader(WSI_Dataset(df_test, df_test.index), shuffle=False, **dl_kwargs)
 
     inference_metrics, inference_loss = run_epoch(model, inference_loader, device, accelerator, loss, None, mode='test',args=args)   
 
