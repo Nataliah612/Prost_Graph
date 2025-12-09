@@ -228,8 +228,8 @@ def run_epoch(model, dataloader, device, accelerator,
     
     # Umbrales por defecto si no se proporcionan
     if y_prob_threshold is None and tumor_abs_threshold is None:
-        y_prob_threshold = args.y_prob_threshold
-        tumor_abs_threshold = args.tumor_abs_threshold
+        y_prob_threshold = args.y_prob_thresh
+        tumor_abs_threshold = args.tumor_abs_thresh
     if alpha_pc is None and alpha_pe is None:
         alpha_pe = args.alpha_pe
         alpha_pc = args.alpha_pc
