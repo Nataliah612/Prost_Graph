@@ -170,9 +170,9 @@ def log_epoch_metrics(epoch, split_name, metrics, loss, output_path):
         log_str.append(f"  AUROC (Macro)    : {m_ml['auroc_macro']:.4f}")
         log_str.append(f"  AUPRC (Macro)    : {m_ml['auprc_macro']:.4f}")
 
-        log_str.append(f"\n-- THRESOLDS --")
+        '''log_str.append(f"\n-- THRESOLDS --")
         log_str.append(f" y prob threshold : {m_ml['y_prob_threshold']:.4f}")
-        log_str.append(f" tumor abs threshold : {m_ml['tumor_abs_threshold']:.4f}")
+        log_str.append(f" tumor abs threshold : {m_ml['tumor_abs_threshold']:.4f}")'''
 
     # =======================
     #  Imprimir en consola
