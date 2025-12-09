@@ -54,24 +54,28 @@ def create_file_label_df(images_path, data_path, NAME='',small_dataset=False ,sl
 
     return df_train
     
-class RAM_WSI_Dataset(Dataset):
+class WSI_Dataset(Dataset):
     """
-    Dataset de WSI (Whole Slide Images) con imágenes precargadas en RAM.
+    Dataset de WSI con opción de precarga completa en CPU o lectura on-demand.
 
     Args:
-        dataframe (pd.DataFrame): DataFrame con columnas
-            'gleason_primary_mapped', 'gleason_secondary_mapped' y 'features' (ruta al .h5).
-        indices (list[int]): Lista de índices del DataFrame que se cargarán en memoria.
+        dataframe (pd.DataFrame)
+        indices (list[int]): Lista de índices del DataFrame.
         random_subsets (bool): Si True, en cada época se usa un subset aleatorio de tamaño len_subset.
                                Si False, se usa todo el dataset (validación/test).
         len_subset (int): Tamaño del subset aleatorio que se usará en cada época.
                           Si es mayor que el total, se ajusta automáticamente.
+        load_on_demand (bool): 
+            - False => Precarga todas las imagenes en CPU.
+            - True  => no precargar imágenes; lectura en __getitem__.
     """
-    def __init__(self, dataframe, indices, random_subsets=False, len_subset=1000):
+    def __init__(self, dataframe, indices, random_subsets=False, len_subset=1000, load_on_demand=False, inference_heatmap=False):
         gc.collect()
         self.dataframe = dataframe
         self.indices = list(indices)
         self.random_subsets = bool(random_subsets)
+        self.load_on_demand = bool(load_on_demand)
+        self.inference_heatmap = bool(inference_heatmap)
 
         # Ajustar tamaño del subset
         if self.random_subsets:
@@ -79,18 +83,18 @@ class RAM_WSI_Dataset(Dataset):
         else:
             self.len_subset = len(self.indices)
 
-        # Transformaciones básicas
-        
+        # Transformaciones estándar
         self.transform = T.Compose([
         T.Resize(size=224, interpolation=T.InterpolationMode.BICUBIC),
         T.CenterCrop(size=(224, 224)),
         T.ToTensor(),
         T.Normalize(mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225))
-    ])
+        ])
 
-        # Precargar imágenes y etiquetas en RAM
-        self.images, self.labels, valid_indices= [], [], []
-        for i in tqdm(self.indices, desc="Loading WSI", file=sys.stdout):
+        # Etiquetas (se precargan siempre por su bajo coste en memoria)
+        self.patch_id, self.images, self.labels, self.coords = [],[],[],[]
+        
+        for i in self.indices:
             row = self.dataframe.iloc[i]
             label = torch.tensor(
                 [row['gleason_primary_mapped'], row['gleason_secondary_mapped']],
@@ -98,21 +102,28 @@ class RAM_WSI_Dataset(Dataset):
             )
             self.labels.append(label)
 
-            features_path = row['patch']
-            with h5py.File(features_path, "r", swmr=True) as h5_file:
-                imgs = h5_file["imgs"][:]  # numpy array [num_imgs, H, W, C]
-                if imgs.shape[0]<= 1:
-                    continue
+        # Si NO estamos en modo load_on_demand, precargar imágenes
+        if not self.load_on_demand:
+            
+            for i in tqdm(self.indices, desc="Loading WSI", file=sys.stdout):
+                row = self.dataframe.iloc[i]
+                features_path = row['patch']
+                with h5py.File(features_path, "r", swmr=True) as h5_file:
+                    imgs = h5_file["imgs"][:]  # numpy array
+                    if inference_heatmap:
+                        coords = h5_file["coords"][:]  # numpy array
 
-            imgs_tensor = torch.stack([self.transform(Image.fromarray(img).convert('RGB')) for img in imgs])
-            self.images.append(imgs_tensor)
-            #self.coords.append(torch.tensor(coords, dtype=torch.long))
-            valid_indices.append(i)  # agregamos solo los que cargamos
+                imgs_tensor = torch.stack([
+                    self.transform(Image.fromarray(img)) for img in imgs
+                ])
+                self.patch_id.append(row['patch'])
+                self.images.append(imgs_tensor)
+                self.coords.append(coords if inference_heatmap else None)
+        else:
+            # En modo load_on_demand sólo guardamos rutas
+            self.feature_paths = [self.dataframe.iloc[i]['patch'] for i in self.indices]
 
-        # Reemplazamos la lista original de índices por los válidos
-        self.indices = valid_indices
-
-        # Mapeo índice original → posición en listas cargadas
+        # Mapeo índice original → posición en listas
         self.idx2pos = {orig_idx: pos for pos, orig_idx in enumerate(self.indices)}
 
         # Inicializar subset
@@ -123,25 +134,50 @@ class RAM_WSI_Dataset(Dataset):
             self.ind_subset = self.indices
 
     def update_random_subset(self):
-        """Genera un nuevo subset aleatorio (sin reemplazo)."""
         if self.random_subsets:
-            self.ind_subset = np.random.choice(self.indices, self.len_subset, replace=False)  
+            self.ind_subset = np.random.choice(self.indices, self.len_subset, replace=False)
 
     def get_current_subset_indices(self):
-        """Devuelve la lista actual de índices del DataFrame usados en esta época."""
         return list(self.ind_subset)
 
     def __len__(self):
         return len(self.ind_subset)
 
     def __getitem__(self, idx):
-        """Devuelve las imágenes y etiquetas del elemento idx dentro del subset actual."""
+        """
+        Si load_on_demand=True => lectura on-demand desde el .h5.
+        Si load_on_demand=False => devuelve las imagenes en tensores precargados.
+        """
         if self.random_subsets:
             orig_idx = int(self.ind_subset[idx])
             pos = self.idx2pos[orig_idx]
-            return self.images[pos], self.labels[pos]
         else:
-            return self.images[idx], self.labels[idx]
+            pos = idx
+
+        patch_id = self.patch_id[pos] 
+        label = self.labels[pos]
+        coords = self.coords[pos] 
+
+        # MODO PRECARGA CPU
+        if not self.load_on_demand:
+            if self.inference_heatmap:
+                return patch_id, self.images[pos], label, coords
+            else:
+                return self.images[pos], label
+
+        # MODO GPU-LIKE: carga desde HDF5 en cada __getitem__
+        feature_path = self.feature_paths[pos]
+        with h5py.File(feature_path, "r") as h5_file:
+            imgs = h5_file["imgs"][:]  # numpy array
+
+        imgs_tensor = torch.stack([
+            self.transform(Image.fromarray(img)) for img in imgs
+        ])
+
+        if self.inference_heatmap:
+                return patch_id, imgs_tensor, label, coords
+        else:
+            return imgs_tensor, label
 
 def collate_fn(batch):
     features, labels = zip(*batch)
