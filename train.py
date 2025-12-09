@@ -60,7 +60,7 @@ print(" *Starting General Configuration ...")
 CUDA_LAUNCH_BLOCKING=1
 use_amp = torch.cuda.is_available()  # mixed precision if GPU available
 args = parse_args()
-args.small_dataset = True  # For testing purposes only
+
 # Multi-GPU accelerator init
 accelerator = Accelerator()
 device = accelerator.device
