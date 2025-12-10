@@ -15,6 +15,8 @@ from accelerate import Accelerator
 
 # =============== IMPORT FUNCIONES ======================
 from models.keep_model import get_keep_ia3_model
+from models.CNN import CNNEmbedder
+
 from utils.data_load import create_file_label_df, WSI_Dataset, collate_fn
 from utils.utils_train import run_epoch, compute_class_weights, set_multiple_seed
 from utils.utils_metrics import log_epoch_metrics, save_metrics_to_csv
@@ -34,6 +36,7 @@ def parse_args():
     parser.add_argument("--small_dataset",action="store_true",default=False, help="Usar un subset de la BBDD para el entrenamiento.")
     parser.add_argument("--pretrain",action="store_true",default=False, help="Preentrena capas del modelo fundacional KEEP.")
     parser.add_argument("--random_subset",action="store_true",default=False, help="Entrenar en cada epoca con un subset aleatorio de los datos.")
+    parser.add_argument("--extractor", type=str,default='keep', help="Modelos de extracción de caracteristicas ('keep','cnn').")
     parser.add_argument("--model", type=str,default='mlp', help="Modelos de clasificacion ('graph','mlp','mean_aggre').")
 
     parser.add_argument("--results_path", type=str, default='/workspace/results', help="Ruta donde se guardaran los resultados")
@@ -70,10 +73,10 @@ set_multiple_seed(args.seed)
 
 # =================== PATHS DEFINITION ===================
 print(" Defining Paths ...")
-pretrain= "pretrain" if args.pretrain==True else ""
-random_subset = "random_subset" if args.random_subset==True else ""
-small_dataset = "small_dataset" if args.small_dataset==True else ""
-name = f"try_{args.model}_lr_{args.learning_rate}_bz_{args.batch_size}_epochs_{args.epochs}_{pretrain}_{random_subset}_weightdecay{args.weight_decay}_{small_dataset}"
+pretrain= "_pretrain" if args.pretrain==True else ""
+random_subset = "_random_subset" if args.random_subset==True else ""
+small_dataset = "_small_dataset" if args.small_dataset==True else ""
+name = f"try_{args.extractor}_{args.model}_lr_{args.learning_rate}_bz_{args.batch_size}_epochs_{args.epochs}{pretrain}{random_subset}_weightdecay{args.weight_decay}{small_dataset}"
 
 results_path = os.path.join(args.results_path, name)
 os.makedirs(results_path, exist_ok=True)
@@ -87,8 +90,11 @@ paths = {   'output_file': os.path.join(results_path, 'output.txt'),
 
 # =================== MODEL CONFIGURATION ===================
 print(" Preparing Model ...")
-model = get_keep_ia3_model(clasification_model = args.model, pretrain=args.pretrain).to(device)
-model = torch.nn.SyncBatchNorm.convert_sync_batchnorm(model)
+if args.extractor == 'cnn':
+    model = CNNEmbedder(clasification_model = args.model)
+elif args.extractor =='keep': 
+    model = get_keep_ia3_model(clasification_model = args.model, pretrain=args.pretrain).to(device)
+    model = torch.nn.SyncBatchNorm.convert_sync_batchnorm(model)
 
 # =================== LOADING DATA ===================
 print(" Preparing DataSet PANDA ...")

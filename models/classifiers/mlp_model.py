@@ -50,7 +50,7 @@ class model_mlp(nn.Module):
             x_probs = torch.softmax(x_class, dim = 1)      # Activation function 
 
             # Guardamos los resultados (son vectores pequeños, caben bien en GPU)
-            all_features.append(x_features)
+            all_features.append(x_features.squeeze())
             all_probs.append(x_probs.squeeze())
 
         #patchs_probs_list = list(torch.split(x_probs, lengths, dim=0))
@@ -61,7 +61,7 @@ class model_mlp(nn.Module):
 
         patchs_probs_list = list(torch.split(total_probs, lengths, dim=0))
 
-        return wsi_logits.squeeze(), patchs_probs_list
+        return wsi_logits, patchs_probs_list
     
 
 class Attention(nn.Module):
