@@ -20,9 +20,7 @@ class model_graph(nn.Module):
         self.to(device)
 
     def forward(self, x):
-        """
-        x: tensor (B, N, D) 
-        """
+        """ x: tensor (B, N, D) """
         graphs_list = [grafo_fully_connected(xi.squeeze(dim=1)) for xi in x]
        
         out, w1 = self.graphgat(graphs_list)
@@ -35,7 +33,7 @@ def grafo_fully_connected(x):
     fila = torch.arange(num_nodos).repeat_interleave(num_nodos)
     col = torch.arange(num_nodos).repeat(num_nodos)
     
-    # Quitamos autoconexiones si quieres
+    # Quitamos autoconexiones 
     mask = fila != col
     edge_index = torch.stack([fila[mask], col[mask]], dim=0)
 
@@ -53,28 +51,28 @@ class gat(torch.nn.Module):
 
     def forward(self, graph_list):
         
-        # 1) Empaquetar graphs en un solo batch
+        #Empaquetar graphs en un solo batch
         batch = Batch.from_data_list(graph_list)
         batch = batch.to(device)
 
         x, edge_index, batch_idx = batch.x, batch.edge_index, batch.batch
-        lengths = batch.ptr[1:] - batch.ptr[:-1]   # patches por WSI
+        lengths = batch.ptr[1:] - batch.ptr[:-1]   # Guaardar el numero de parches por WSI 
 
-        # 2) GATConv 
+        # GATConv 
         z1 = self.gat1(x, edge_index)
         z1 = F.relu(z1)
 
         z2 = self.gat2(z1, edge_index)
         z2 = F.relu(z2)
 
-        # 3) Clasificador por patch
+        # Clasificador por patch
         logits = self.classifier(z2)
         probs = torch.softmax(logits, dim=1)
 
-        # 4) MIL aggregation por WSI usando batch_idx   
+        # aggregation por WSI usando batch_idx | Pesos de importancia de los parches 
         w = self.Aggr(z1, batch_idx)
         
-        # 5) Weighted max per WSI
+        # 5) Weighted per WSI
         weighted = w * probs             # (N_total, 4)
 
         # 6) Reconstruir patch predictions por WSI
@@ -101,7 +99,7 @@ class Aggregate_Attnt(nn.Module):
         gate = softmax(A, index=batch_idx, num_nodes=x.size(0))
         return gate
 
-class mlp(nn.Module):
+class mlp(nn.Module): #Clasificador 
     def __init__(self, in_dim=64, out_dim=4):
         super().__init__()
         self.ln = nn.LayerNorm(in_dim)
@@ -116,7 +114,6 @@ class mlp(nn.Module):
         
         return x
 
-    
 def weights_init(m):
     if isinstance(m, nn.Linear):
         torch.nn.init.xavier_uniform_(m.weight.data)

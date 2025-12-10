@@ -194,7 +194,7 @@ def select_gleason_grades_from_batch_proportions(proportions, tumor_abs_thresh=0
 def run_epoch(model, dataloader, device, accelerator, 
               loss_BCE, optimizer=None, 
               args=None, mode="train",inference_heatmap = False,
-              y_prob_threshold=None, tumor_abs_threshold=None, alpha_pe=0, alpha_pc=0):
+              y_prob_threshold=None, tumor_abs_threshold=None, alpha_pe=None, alpha_pc=None):
     """
     Ejecuta una época completa (train, val o test) y devuelve métricas y pérdida media.
 

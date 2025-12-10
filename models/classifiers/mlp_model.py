@@ -20,7 +20,7 @@ class model_mlp(nn.Module):
             nn.Dropout(0.2),
             nn.Linear(32, 4))
         
-        self.mil = MILArchitecture(classes=[0,1,2,3],aggregation=mil_aggregation_mode, L_value = 512 )
+        self.mil = MILArchitecture(classes=[0,1,2,3],aggregation=mil_aggregation_mode, L_value = 512)
         self.chunk_size = chunk_size 
 
     def forward(self, x):

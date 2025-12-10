@@ -172,7 +172,7 @@ for epoch in range(args.epochs):
                     writer.writerow([epoch, current_indices])
             data_train.update_random_subset()
     # VALIDATION
-    val_metrics, val_loss,y_prob_threshold, tumor_abs_threshold = run_epoch(model, val_loader, device, accelerator, loss, None, mode='val', args=args)
+    val_metrics, val_loss, y_prob_threshold, tumor_abs_threshold = run_epoch(model, val_loader, device, accelerator, loss, None, mode='val', args=args)
                                                                                     
     print("Selected thresholds - y_prob_threshold:", y_prob_threshold, " tumor_abs_threshold:", tumor_abs_threshold, flush=True)
         
@@ -201,7 +201,6 @@ for epoch in range(args.epochs):
                     f.write(f"Early stopping activado - Entrenamiento finalizado\n")
             break
 
-
     # Saving last model
     accelerator.wait_for_everyone()
     accelerator.save_state(paths['result_last_model_path'])
@@ -209,13 +208,25 @@ for epoch in range(args.epochs):
 # =================== TEST ===================
 print(f' FINALIZADO EL ENTRENAMIENTO ')
 # Cargar el estado completo guardado por accelerate, result_best_model_path es la carpeta creada por save_state
+
+if accelerator.is_main_process:
+    print("----------------- ENTRENAMIENTO FINALIZADO -----------------",flush=True)
+    print("Cargando el mejor modelo para la evaluación en el conjunto de test...", flush=True)
+    print(f"  UMBRALES para Test: Y_prob_thresh{best_y_prob_threshold} y  tumor_abs_thresh: {best_tumor_abs_threshold:.4f}\n", flush=True)
+    with open(paths['log_output_path'], "a") as f:
+        f.write("----------------- ENTRENAMIENTO FINALIZADO -----------------\n")
+        f.write(f"  UMBRALES para Test: Y_prob_thresh{best_y_prob_threshold} y  tumor_abs_thresh: {best_tumor_abs_threshold:.4f}\n")
+    
+    # Asegurar que el archivo guardado por el proceso principal esté disponible para todos.
+    accelerator.wait_for_everyone()
+
 try:
     accelerator.load_state(paths['result_best_model_path'])
     print(f"Checkpoint cargado exitosamente desde {paths['result_best_model_path']}")
 except Exception as e:
     print(f"Error cargando checkpoint de accelerate: {e}")
 
-test_metrics, test_loss = run_epoch(model, test_loader, device, accelerator, loss, None, mode='test',args=args)   
+test_metrics, test_loss = run_epoch(model, test_loader, device, accelerator, loss, None, mode='test',args=args, y_prob_threshold=best_y_prob_threshold, tumor_abs_threshold=best_tumor_abs_threshold)   
 
 accelerator.wait_for_everyone()
     
@@ -240,11 +251,10 @@ if args.inference == True:
     print("Loading embeddings for Inference ...")
     inference_loader = DataLoader(WSI_Dataset(df_test, df_test.index), shuffle=False, **dl_kwargs)
 
-    inference_metrics, inference_loss = run_epoch(model, inference_loader, device, accelerator, loss, None, mode='test',args=args)   
+    inference_metrics, inference_loss = run_epoch(model, inference_loader, device, accelerator, loss, None, mode='test',args=args, y_prob_threshold=best_y_prob_threshold, tumor_abs_threshold=best_tumor_abs_threshold)   
 
-    print(f"Test Loss: {inference_loss:.4f} Acc: {inference_metrics[0]:.4f} Kappa: {inference_metrics[-1]:.4f}")
-    print(f"Test Loss: {inference_loss:.4f} Acc_global: {inference_metrics['global'][0]:.4f} Kappa_global: {inference_metrics['global'][-1]:.4f} | Acc_primary: {inference_metrics['primary'][0]:.4f} Kappa_primary: {inference_metrics['primary'][-1]:.4f} |Acc_secondary: {inference_metrics['secondary'][0]:.4f} Kappa_secondary: {inference_metrics['secondary'][-1]:.4f} ")
-    with open(paths['output_file'], "a") as f:
-        f.write(f" Test Loss: {inference_loss:.4f}  Acc_global: {inference_metrics['global'][0]:.4f} Kappa_global: {inference_metrics['global'][-1]:.4f} | Acc_primary: {inference_metrics['primary'][0]:.4f} Kappa_primary: {inference_metrics['primary'][-1]:.4f} |Acc_secondary: {inference_metrics['secondary'][0]:.4f} Kappa_secondary: {inference_metrics['secondary'][-1]:.4f}\n")
-        f.write(f"Acuracy: {inference_metrics[0]}, | Precision: {inference_metrics[1]} | Recall : {inference_metrics[2]}| F1 Score: {inference_metrics[3]}")
-        f.write(f"Métricas : {inference_metrics}")
+    accelerator.wait_for_everyone()
+    
+    if accelerator.is_main_process:
+        log_epoch_metrics("SICAP dataset", "Test", inference_metrics, inference_loss, paths['log_output_path'])
+        save_metrics_to_csv(inference_metrics, epoch=0,  filepath= os.path.join(paths['results_path'], "sicap_test_metrics.csv"))

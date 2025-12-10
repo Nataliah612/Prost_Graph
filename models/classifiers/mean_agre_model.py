@@ -38,26 +38,31 @@ class model_mean_aggre(nn.Module):
             raise RuntimeError("Batch contains no patches")
         
         all_patches = torch.cat([t for t in inputs_list if t.size(0) > 0], dim=0)  # (N_total, C, H, W)
-
         chunks = torch.split(all_patches, self.chunk_size, dim=0)
         
-        all_probs = []
-
+        all_features, all_probs = [],[]
         # 4. Procesar chunk a chunk en GPU
         for chunk in chunks:
             # Mover SOLO este trocito a GPU
             chunk_gpu = chunk.to(device, non_blocking=True)
 
             x_features = self.embedding(chunk_gpu)      # EMBEDDING GLEASON GRADE
+            all_probs.append(x_features.squeeze())
+
             x_class = self.classifier(x_features)       # CLASIFICATOR GLEASON GRADE
             x_probs = torch.softmax(x_class, dim = 1)   # Activation function 
             
             all_probs.append(x_probs.squeeze())
 
+        # Agregacion de características por la media 
+        total_features = torch.cat(all_features, dim=0) 
+        patchs_features_list = list(torch.split(total_features, lengths, dim=0))
+        wsi_features = torch.stack( [torch.mean(features, dim=0, keepdim=True) for features in patchs_features_list], dim=0) 
+        wsi_class = self.classifier(wsi_features)       # CLASIFICATOR GLEASON GRADE
+        wsi_probs = torch.sigmoid(wsi_class, dim = 1)   # Activation function 
+
         total_probs = torch.cat(all_probs, dim=0) 
         patchs_probs_list = list(torch.split(total_probs, lengths, dim=0))
 
-        wsi_logits = wsi_logits = torch.stack( [torch.mean(probs, dim=0, keepdim=True) for probs in patchs_probs_list], dim=0) 
-
-        return wsi_logits.squeeze(), patchs_probs_list
+        return wsi_probs, patchs_probs_list
     
