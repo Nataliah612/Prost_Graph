@@ -17,10 +17,10 @@ import sys
 def create_file_label_df(images_path, data_path, NAME='',small_dataset=False ,slide_col='image_id'):
     patch_list,patient_list  = [], []
     gleason_score = []
-    gleason_primary_list,gleason_secondary_list  = [], []
+    gleason_primary_list, gleason_secondary_list  = [], []
     df = pd.read_excel(data_path)
     
-    df = df.head(200) if small_dataset == True else df
+    df = df.head(100) if small_dataset == True else df
 
     wsis = [f for f in os.listdir(images_path) if f.endswith('.h5')]
     for f in tqdm(wsis, desc="Procesando WSIs", file=sys.stdout):
@@ -84,12 +84,10 @@ class WSI_Dataset(Dataset):
             self.len_subset = len(self.indices)
 
         # Transformaciones estándar
-        self.transform = T.Compose([
-        T.Resize(size=224, interpolation=T.InterpolationMode.BICUBIC),
-        T.CenterCrop(size=(224, 224)),
-        T.ToTensor(),
-        T.Normalize(mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225))
-        ])
+        self.transform = T.Compose([    T.Resize(size=224, interpolation=T.InterpolationMode.BICUBIC),
+                                        T.CenterCrop(size=(224, 224)),
+                                        T.ToTensor(),
+                                        T.Normalize(mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225))  ])
 
         # Etiquetas (se precargan siempre por su bajo coste en memoria)
         self.patch_id, self.images, self.labels, self.coords = [],[],[],[]
@@ -113,9 +111,7 @@ class WSI_Dataset(Dataset):
                     if inference_heatmap:
                         coords = h5_file["coords"][:]  # numpy array
 
-                imgs_tensor = torch.stack([
-                    self.transform(Image.fromarray(img)) for img in imgs
-                ])
+                imgs_tensor = torch.stack([self.transform(Image.fromarray(img)) for img in imgs])
                 self.patch_id.append(row['patch'])
                 self.images.append(imgs_tensor)
                 self.coords.append(coords if inference_heatmap else None)
@@ -170,9 +166,7 @@ class WSI_Dataset(Dataset):
         with h5py.File(feature_path, "r") as h5_file:
             imgs = h5_file["imgs"][:]  # numpy array
 
-        imgs_tensor = torch.stack([
-            self.transform(Image.fromarray(img)) for img in imgs
-        ])
+        imgs_tensor = torch.stack([self.transform(Image.fromarray(img)) for img in imgs ])
 
         if self.inference_heatmap:
                 return patch_id, imgs_tensor, label, coords

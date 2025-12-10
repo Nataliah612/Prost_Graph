@@ -382,7 +382,6 @@ def save_metrics_to_csv(metrics: dict, epoch: int, filepath: str = "metrics.csv"
 
         writer.writerow(row)
 
-
 def build_heatmap(coords, scores, patch_size=512, scale_factor=16, save_path=None):
     """
     coords: Nx2 array (x, y)

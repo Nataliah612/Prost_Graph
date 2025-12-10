@@ -20,7 +20,7 @@ class model_mlp(nn.Module):
             nn.Dropout(0.2),
             nn.Linear(32, 4))
         
-        self.mil = MILArchitecture(classes=[0,1,2,3],aggregation=mil_aggregation_mode, L_value = 512)
+        self.mil = MILArchitecture(classes=[0,1,2,3],aggregation=mil_aggregation_mode, L_value = 512 )
         self.chunk_size = chunk_size 
 
     def forward(self, x):
@@ -62,6 +62,7 @@ class model_mlp(nn.Module):
         patchs_probs_list = list(torch.split(total_probs, lengths, dim=0))
 
         return wsi_logits.squeeze(), patchs_probs_list
+    
 
 class Attention(nn.Module):
     def __init__(self, L=512):
@@ -116,6 +117,9 @@ class MILArchitecture(nn.Module):
         lengths: list[int] (n_parches por WSI), sum(lengths) == N_total
         Devuelve: Tensor (batch_size, C) con logits/score por WSI
         """
+        assert patch_probs.dim() == 2
+        assert patch_feats.dim() == 2
+
         probs_splits = torch.split(patch_probs, lengths, dim=0)
         feats_splits = torch.split(patch_feats, lengths, dim=0)
 
@@ -135,9 +139,13 @@ class MILArchitecture(nn.Module):
                     wsis.append(torch.zeros(self.nClasses, device=patch_probs.device))
                 else:
                     wsis.append(torch.mean(p, dim=0))
+
+        
         elif self.aggregation == 'attentionMIL':
             for p, f in zip(probs_splits, feats_splits):
-                wsis.append(self.attentionModule(p, f))
+                wsi = self.attentionModule(p, f)
+                wsis.append(wsi)
+              
         else:
             raise ValueError(f"Unknown aggregation: {self.aggregation}")
         

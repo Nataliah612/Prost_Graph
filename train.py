@@ -34,7 +34,7 @@ def parse_args():
     parser.add_argument("--small_dataset",action="store_true",default=False, help="Usar un subset de la BBDD para el entrenamiento.")
     parser.add_argument("--pretrain",action="store_true",default=False, help="Preentrena capas del modelo fundacional KEEP.")
     parser.add_argument("--random_subset",action="store_true",default=False, help="Entrenar en cada epoca con un subset aleatorio de los datos.")
-    parser.add_argument("--model", type=str,default='mlp', help="Modelos de clasificacion ('graph','mlp','mean_aggre').")
+    parser.add_argument("--model", type=str,default='mean_aggre', help="Modelos de clasificacion ('graph','mlp','mean_aggre').")
 
     parser.add_argument("--results_path", type=str, default='/workspace/results', help="Ruta donde se guardaran los resultados")
 
@@ -56,20 +56,20 @@ def parse_args():
     return parser.parse_args()
 
 # =================== GENERAL CONFIGURACION ===================
-print(" *Starting General Configuration ...")
+print(" Starting General Configuration ...")
 CUDA_LAUNCH_BLOCKING=1
 use_amp = torch.cuda.is_available()  # mixed precision if GPU available
 args = parse_args()
-
+args.small_dataset = True
 # Multi-GPU accelerator init
 accelerator = Accelerator()
 device = accelerator.device
-print(f"Usando dispositivo: {device}", flush = True)
+print(f" Usando dispositivo: {device}", flush = True)
 torch.cuda.empty_cache()
 set_multiple_seed(args.seed)
 
 # =================== PATHS DEFINITION ===================
-print("*Defining Paths ...")
+print(" Defining Paths ...")
 name = f"try_{args.model}_{args.learning_rate}_{args.batch_size}_{args.epochs}_{args.pretrain}"
 
 results_path = os.path.join(args.results_path, name)
@@ -84,12 +84,12 @@ paths = {   'output_file': os.path.join(results_path, 'output.txt'),
             'log_output_path':os.path.join(results_path, 'train_log_output.txt')}
 
 # =================== MODEL CONFIGURATION ===================
-print("*Preparing Model ...")
-model = get_keep_ia3_model(clasification_model = args.model,pretrain=args.pretrain).to(device)
+print(" Preparing Model ...")
+model = get_keep_ia3_model(clasification_model = args.model, pretrain=args.pretrain).to(device)
 model = torch.nn.SyncBatchNorm.convert_sync_batchnorm(model)
 
 # =================== LOADING DATA ===================
-print("*Preparing DataSet PANDA ...")
+print(" Preparing DataSet PANDA ...")
 
 with open(paths['log_output_path'], "w") as f:
         f.write(f"Creating Dataset SICAP \n")
@@ -125,14 +125,14 @@ with open(paths['log_output_path'], "a") as f:
     f.write(f"Time for loading data : {time_load} \n")
 
 # =================== WEIGHTS CALCUALTION ===================
-print("* Preparing Class Weights and hyperpatameters ...")
+print(" Preparing Class Weights and hyperpatameters ...")
 primary_weights = compute_class_weights(df_train['gleason_primary_mapped'])
 secondary_weights = compute_class_weights(df_train['gleason_secondary_mapped'])
 sum_weights = primary_weights + secondary_weights
 
 # =================== TRAINING PARAMETHERS ===================
-print("* Preparing Training hyperparamethers ...")
-loss = nn.BCELoss(weight=sum_weights) #WithLogitsLoss(pos_weight=sum_weights) 
+print(" Preparing Training hyperparamethers ...")
+loss = nn.BCELoss(weight=sum_weights) 
 
 optimizer = optim.AdamW(model.parameters(), lr=args.learning_rate) #weight_decay=1e-2
 
@@ -149,7 +149,7 @@ no_improve = 0
 best_y_prob_threshold, best_tumor_abs_threshold = 0,0
 
 # =================== TRAINING ===================
-print("* Starting Training ...")
+print(" Starting Training ...")
 for epoch in range(args.epochs):
     print(f"\nEpoch {epoch}")
     with open(paths['output_file'], "a") as f:
@@ -162,15 +162,15 @@ for epoch in range(args.epochs):
         save_metrics_to_csv(train_metrics, epoch=epoch,  filepath= os.path.join(paths['results_path'], "train_train_metrics.csv"))
     
     if args.random_subset:
-            current_indices = data_train.get_current_subset_indices()
-            if accelerator.is_main_process:
-                file_exists = os.path.isfile(paths['train_subset_indices_per_epoch_csv_path'])
-                with open(paths['train_subset_indices_per_epoch_csv_path'], mode='a', newline='') as f:
-                    writer = csv.writer(f)
-                    if not file_exists:
-                        writer.writerow(['Epoch','Indices'])
-                    writer.writerow([epoch, current_indices])
-            data_train.update_random_subset()
+        current_indices = data_train.get_current_subset_indices()
+        if accelerator.is_main_process:
+            file_exists = os.path.isfile(paths['train_subset_indices_per_epoch_csv_path'])
+            with open(paths['train_subset_indices_per_epoch_csv_path'], mode='a', newline='') as f:
+                writer = csv.writer(f)
+                if not file_exists:
+                    writer.writerow(['Epoch','Indices'])
+                writer.writerow([epoch, current_indices])
+        data_train.update_random_subset()
     # VALIDATION
     val_metrics, val_loss, y_prob_threshold, tumor_abs_threshold = run_epoch(model, val_loader, device, accelerator, loss, None, mode='val', args=args)
                                                                                     
@@ -233,13 +233,13 @@ accelerator.wait_for_everyone()
 if accelerator.is_main_process:
     log_epoch_metrics(epoch, "Test", test_metrics, test_loss, paths['log_output_path'])
     save_metrics_to_csv(test_metrics, epoch=epoch,  filepath= os.path.join(paths['results_path'], "test_metrics.csv"))
-        
 
 # =================== INFERENCE ===================
 if args.inference == True: 
         
     with open(paths['output_file'], "a") as f:
         f.write(f"Inference in SICAP \n")
+    print(f"Inference in BBDD : SICAP")
         
     df_test = create_file_label_df(args.data_sicap_patches, args.data_sicap_path, NAME = 'SICAP')
 

@@ -47,9 +47,9 @@ class model_mean_aggre(nn.Module):
             chunk_gpu = chunk.to(device, non_blocking=True)
 
             x_features = self.embedding(chunk_gpu)      # EMBEDDING GLEASON GRADE
-            all_probs.append(x_features.squeeze())
+            all_features.append(x_features.squeeze())
 
-            x_class = self.classifier(x_features)       # CLASIFICATOR GLEASON GRADE
+            x_class = self.classifier(x_features.squeeze())       # CLASIFICATOR GLEASON GRADE
             x_probs = torch.softmax(x_class, dim = 1)   # Activation function 
             
             all_probs.append(x_probs.squeeze())
@@ -58,11 +58,12 @@ class model_mean_aggre(nn.Module):
         total_features = torch.cat(all_features, dim=0) 
         patchs_features_list = list(torch.split(total_features, lengths, dim=0))
         wsi_features = torch.stack( [torch.mean(features, dim=0, keepdim=True) for features in patchs_features_list], dim=0) 
-        wsi_class = self.classifier(wsi_features)       # CLASIFICATOR GLEASON GRADE
-        wsi_probs = torch.sigmoid(wsi_class, dim = 1)   # Activation function 
 
+        wsi_class = self.classifier(wsi_features)       # CLASIFICATOR GLEASON GRADE
+        wsi_probs = torch.sigmoid(wsi_class.squeeze())            # Activation function 
+
+        # Prediccion por parche 
         total_probs = torch.cat(all_probs, dim=0) 
         patchs_probs_list = list(torch.split(total_probs, lengths, dim=0))
 
         return wsi_probs, patchs_probs_list
-    
