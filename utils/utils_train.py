@@ -307,7 +307,6 @@ def run_epoch(model, dataloader, device, accelerator,
                     "slide_id": patch_id[i],
                     "coords": coords[i],
                     "scores": torch.argmax(patchs_prediction[i], dim=1).cpu().numpy(), 
-                   
                     }
                 test_output.append(slide_out)
 
@@ -324,13 +323,12 @@ def run_epoch(model, dataloader, device, accelerator,
     y_onehot = torch.cat(all_y_true_onehot).numpy()
 
     # --- Calcular métricas ---
-    metrics = compute_all_gleason_metrics(
-        y_true_primary=y_true1,
-        y_pred_primary=y_pred1,
-        y_true_secondary=y_true2,
-        y_pred_secondary=y_pred2,
-        y_true_onehot=y_onehot,
-        y_probs=probs,y_prob_threshold = y_prob_threshold)
+    metrics = compute_all_gleason_metrics(  y_true_primary=y_true1,
+                                            y_pred_primary=y_pred1,
+                                            y_true_secondary=y_true2,
+                                            y_pred_secondary=y_pred2,
+                                            y_true_onehot=y_onehot,
+                                            y_probs=probs,y_prob_threshold = y_prob_threshold)
     
     if mode == 'val':
         val_metrics, y_prob_threshold= selecting_prob_thresholds(y_true1, y_pred1, y_true2, y_pred2, y_onehot, probs)
@@ -352,13 +350,12 @@ def selecting_prob_thresholds(y_true1, y_pred1, y_true2, y_pred2, y_onehot, prob
 
     for y_prob_threshold in thresh_list:
 
-        metrics = compute_all_gleason_metrics(
-            y_true_primary=y_true1,
-            y_pred_primary=y_pred1,
-            y_true_secondary=y_true2,
-            y_pred_secondary=y_pred2,
-            y_true_onehot=y_onehot,
-            y_probs=probs,y_prob_threshold = y_prob_threshold)
+        metrics = compute_all_gleason_metrics(  y_true_primary=y_true1,
+                                                y_pred_primary=y_pred1,
+                                                y_true_secondary=y_true2,
+                                                y_pred_secondary=y_pred2,
+                                                y_true_onehot=y_onehot,
+                                                y_probs=probs,y_prob_threshold = y_prob_threshold)
 
         score_f1 = metrics['multilabel']["f1_macro"] 
         
@@ -370,7 +367,6 @@ def selecting_prob_thresholds(y_true1, y_pred1, y_true2, y_pred2, y_onehot, prob
     return best_metrics, best_y_prob_threshold 
 
 def selecting_abs_threshold(all_wsi_proportions, y_primary, y_secondary):
-
     # Concatenar proporciones
     all_proportions = torch.cat(all_wsi_proportions) # Necesitas agregar all_wsi_proportions a tus listas de acumulación.
 

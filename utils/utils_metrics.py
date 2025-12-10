@@ -2,6 +2,7 @@ import torch
 import numpy as np
 import os 
 import csv 
+from PIL import Image, ImageDraw
 
 from sklearn.metrics import (accuracy_score,precision_score,recall_score,f1_score, cohen_kappa_score, roc_auc_score, average_precision_score)
 
@@ -41,23 +42,21 @@ def compute_metrics(y_true, y_pred):
     # Kappa
     kappa = cohen_kappa_score(y_true, y_pred, weights='quadratic')
 
-    return {
-        "accuracy": acc,
+    return {"accuracy": acc,
 
-        "precision_micro": prec_micro,
-        "precision_macro": prec_macro,
-        "precision_weighted": prec_weighted,
+            "precision_micro": prec_micro,
+            "precision_macro": prec_macro,
+            "precision_weighted": prec_weighted,
 
-        "recall_micro": rec_micro,
-        "recall_macro": rec_macro,
-        "recall_weighted": rec_weighted,
+            "recall_micro": rec_micro,
+            "recall_macro": rec_macro,
+            "recall_weighted": rec_weighted,
 
-        "f1_micro": f1_micro,
-        "f1_macro": f1_macro,
-        "f1_weighted": f1_weighted,
+            "f1_micro": f1_micro,
+            "f1_macro": f1_macro,
+            "f1_weighted": f1_weighted,
 
-        "kappa": kappa,
-    }
+            "kappa": kappa}
 
 def compute_multilabel_metrics(y_true_onehot, y_prob, y_prob_threshold=0.4):
     """
@@ -81,65 +80,37 @@ def compute_multilabel_metrics(y_true_onehot, y_prob, y_prob_threshold=0.4):
     metrics["subset_accuracy"] = accuracy_score(y_true_onehot, y_pred)
 
     # ----- MICRO -----
-    metrics["precision_micro"] = precision_score(
-        y_true_onehot, y_pred, average="micro", zero_division=0
-    )
-    metrics["recall_micro"] = recall_score(
-        y_true_onehot, y_pred, average="micro", zero_division=0
-    )
-    metrics["f1_micro"] = f1_score(
-        y_true_onehot, y_pred, average="micro", zero_division=0
-    )
+    metrics["precision_micro"] = precision_score(y_true_onehot, y_pred, average="micro", zero_division=0)
+    metrics["recall_micro"] = recall_score(y_true_onehot, y_pred, average="micro", zero_division=0)
+    metrics["f1_micro"] = f1_score(y_true_onehot, y_pred, average="micro", zero_division=0)
 
     # ----- MACRO -----
-    metrics["precision_macro"] = precision_score(
-        y_true_onehot, y_pred, average="macro", zero_division=0
-    )
-    metrics["recall_macro"] = recall_score(
-        y_true_onehot, y_pred, average="macro", zero_division=0
-    )
-    metrics["f1_macro"] = f1_score(
-        y_true_onehot, y_pred, average="macro", zero_division=0
-    )
+    metrics["precision_macro"] = precision_score(y_true_onehot, y_pred, average="macro", zero_division=0)
+    metrics["recall_macro"] = recall_score(y_true_onehot, y_pred, average="macro", zero_division=0)
+    metrics["f1_macro"] = f1_score(y_true_onehot, y_pred, average="macro", zero_division=0)
 
     # ----- WEIGHTED -----
-    metrics["precision_weighted"] = precision_score(
-        y_true_onehot, y_pred, average="weighted", zero_division=0
-    )
-    metrics["recall_weighted"] = recall_score(
-        y_true_onehot, y_pred, average="weighted", zero_division=0
-    )
-    metrics["f1_weighted"] = f1_score(
-        y_true_onehot, y_pred, average="weighted", zero_division=0
-    )
+    metrics["precision_weighted"] = precision_score(y_true_onehot, y_pred, average="weighted", zero_division=0)
+    metrics["recall_weighted"] = recall_score(y_true_onehot, y_pred, average="weighted", zero_division=0)
+    metrics["f1_weighted"] = f1_score(y_true_onehot, y_pred, average="weighted", zero_division=0)
 
     # ----- AUROC -----
     try:
-        metrics["auroc_macro"] = roc_auc_score(
-            y_true_onehot, y_prob, average="macro"
-        )
-        metrics["auroc_weighted"] = roc_auc_score(
-            y_true_onehot, y_prob, average="weighted"
-        )
+        metrics["auroc_macro"] = roc_auc_score(y_true_onehot, y_prob, average="macro")
+        metrics["auroc_weighted"] = roc_auc_score(y_true_onehot, y_prob, average="weighted")
     except ValueError:
         metrics["auroc_macro"] = float("nan")
         metrics["auroc_weighted"] = float("nan")
 
     # ----- AUPRC -----
     try:
-        metrics["auprc_macro"] = average_precision_score(
-            y_true_onehot, y_prob, average="macro"
-        )
-        metrics["auprc_weighted"] = average_precision_score(
-            y_true_onehot, y_prob, average="weighted"
-        )
+        metrics["auprc_macro"] = average_precision_score(y_true_onehot, y_prob, average="macro")
+        metrics["auprc_weighted"] = average_precision_score( y_true_onehot, y_prob, average="weighted")
     except ValueError:
         metrics["auprc_macro"] = float("nan")
         metrics["auprc_weighted"] = float("nan")
 
     return metrics
-
-
 
 def compute_all_gleason_metrics(y_true_primary, y_pred_primary,
                                 y_true_secondary, y_pred_secondary, y_true_onehot=None,y_probs=None, y_prob_threshold=0.4):
@@ -169,11 +140,9 @@ def compute_all_gleason_metrics(y_true_primary, y_pred_primary,
     metrics_global = compute_metrics(y_true_global, y_pred_global)
 
     # --- Empaquetar resultados en un solo diccionario ---
-    metrics = {
-        "primary": metrics_primary,
-        "secondary": metrics_secondary,
-        "global": metrics_global,
-    }
+    metrics = { "primary": metrics_primary,
+                "secondary": metrics_secondary,
+                "global": metrics_global    }
 
      # --- Multilabel ---
     if y_true_onehot is not None and y_probs is not None:
@@ -408,12 +377,11 @@ def build_heatmap(coords, scores, patch_size=512, scale_factor=16, save_path=Non
     heatmap = np.zeros((height + patch_size, width + patch_size, 3), dtype=np.uint8)
 
     # Mapa de colores
-    color_map = {
-        3: (255,   0,   0),   # Rojo
-        2: (255, 128,   0),   # Naranja
-        1: (255, 255,   0),   # Amarillo
-        0: (  0,   0, 255)    # Azul
-    }
+    color_map = {   3: (255,   0,   0),   # Rojo
+                    2: (255, 128,   0),   # Naranja
+                    1: (255, 255,   0),   # Amarillo
+                    0: (  0,   0, 255)    # Azul
+                }
 
     # Dibujar los parches según su score en color sólido
     for (x, y), s in zip(shifted_coords, scores):
@@ -426,8 +394,6 @@ def build_heatmap(coords, scores, patch_size=512, scale_factor=16, save_path=Non
         img.save(save_path)
 
     return img
-
-from PIL import Image, ImageDraw
 
 
 def overlay_heatmap_on_image(orig, heatmap, alpha=0.45):
@@ -446,13 +412,12 @@ def draw_gt_patches(orig, df_gt, slide_id, patch_size=512, scale_factor=16):
     """
     alpha = 80
     # Colores clase → RGB
-    COLOR_MAP = {
-        5: (255, 0, 0, alpha),      # Rojo
-        4: (255, 140, 0, alpha),    # Naranja
-        4.5: (255, 140, 0, alpha),    # Naranja
-        3: (255, 255, 0, alpha),    # Amarillo
-        0: (0, 0, 255, alpha),      # Azul
-    }
+    COLOR_MAP = {   5: (255, 0, 0, alpha),      # Rojo
+                    4: (255, 140, 0, alpha),    # Naranja
+                    4.5: (255, 140, 0, alpha),    # Naranja
+                    3: (255, 255, 0, alpha),    # Amarillo
+                    0: (0, 0, 255, alpha),      # Azul
+                }
     slide_id = slide_id.split('.')[0]
     df_slide = df_gt[df_gt["Slide_ID"] == slide_id]
 

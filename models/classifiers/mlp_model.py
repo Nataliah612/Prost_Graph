@@ -46,7 +46,7 @@ class model_mlp(nn.Module):
             # Mover SOLO este trocito a GPU
             chunk_gpu = chunk.to(device, non_blocking=True)
             x_features = self.embedding(chunk_gpu) # EMBEDDING GLEASON GRADE
-            x_class = self.classifier(x_features) # CLASIFICATOR GLEASON GRADE
+            x_class = self.classifier(x_features.squeeze()) # CLASIFICATOR GLEASON GRADE
             x_probs = torch.softmax(x_class, dim = 1)      # Activation function 
 
             # Guardamos los resultados (son vectores pequeños, caben bien en GPU)
@@ -117,14 +117,11 @@ class MILArchitecture(nn.Module):
         lengths: list[int] (n_parches por WSI), sum(lengths) == N_total
         Devuelve: Tensor (batch_size, C) con logits/score por WSI
         """
-        assert patch_probs.dim() == 2
-        assert patch_feats.dim() == 2
+        #assert patch_probs.dim() == 2
+        #assert patch_feats.dim() == 2
 
         probs_splits = torch.split(patch_probs, lengths, dim=0)
         feats_splits = torch.split(patch_feats, lengths, dim=0)
-
-        # for i, (p, f) in enumerate(zip(probs_splits, feats_splits)):
-        #     print(f"[MIL]  WSI {i} probs: {p.shape} feats: {f.shape}")
 
         wsis = []
         if self.aggregation == 'max':
@@ -140,7 +137,6 @@ class MILArchitecture(nn.Module):
                 else:
                     wsis.append(torch.mean(p, dim=0))
 
-        
         elif self.aggregation == 'attentionMIL':
             for p, f in zip(probs_splits, feats_splits):
                 wsi = self.attentionModule(p, f)

@@ -34,13 +34,13 @@ def parse_args():
     parser.add_argument("--small_dataset",action="store_true",default=False, help="Usar un subset de la BBDD para el entrenamiento.")
     parser.add_argument("--pretrain",action="store_true",default=False, help="Preentrena capas del modelo fundacional KEEP.")
     parser.add_argument("--random_subset",action="store_true",default=False, help="Entrenar en cada epoca con un subset aleatorio de los datos.")
-    parser.add_argument("--model", type=str,default='mean_aggre', help="Modelos de clasificacion ('graph','mlp','mean_aggre').")
+    parser.add_argument("--model", type=str,default='mlp', help="Modelos de clasificacion ('graph','mlp','mean_aggre').")
 
     parser.add_argument("--results_path", type=str, default='/workspace/results', help="Ruta donde se guardaran los resultados")
 
     parser.add_argument("--batch_size", type=int, default=4, help="Tamaño de batch")
     parser.add_argument("--learning_rate", type=float, default=1e-4, help="Learning rate")
-    parser.add_argument("--weight_decay", type=float, default=1e-5, help="Weight decay")
+    parser.add_argument("--weight_decay", type=float, default=1e-2, help="Weight decay")
     parser.add_argument("--momentum", type=float, default=0.99, help="Momentum")
     parser.add_argument("--epochs", type=int, default=10, help="Número de épocas")
     parser.add_argument("--patience", type=int, default=20, help="Paciencia para early stopping")
@@ -48,8 +48,8 @@ def parse_args():
     parser.add_argument("--seed", type=int, default=98, help="Semilla aleatoria")
     parser.add_argument("--num_workers", type=int, default=2, help="Numero de paralelizaciones")
 
-    parser.add_argument("--y_prob_thresh", default=0.3, type=float)
-    parser.add_argument("--tumor_abs_thresh", default=0.2, type=float)
+    parser.add_argument("--y_prob_thresh", default=0.4, type=float)
+    parser.add_argument("--tumor_abs_thresh", default=0.15, type=float)
     parser.add_argument("--alpha_pe", default=0.01, type=float)
     parser.add_argument("--alpha_pc", default=0.01, type=float)
 
@@ -70,13 +70,15 @@ set_multiple_seed(args.seed)
 
 # =================== PATHS DEFINITION ===================
 print(" Defining Paths ...")
-name = f"try_{args.model}_{args.learning_rate}_{args.batch_size}_{args.epochs}_{args.pretrain}"
+pretrain= "pretrain" if args.pretrain==True else ""
+random_subset = "random_subset" if args.random_subset==True else ""
+small_dataset = "small_dataset" if args.small_dataset==True else ""
+name = f"try_{args.model}_lr_{args.learning_rate}_bz_{args.batch_size}_epochs_{args.epochs}_{pretrain}_{random_subset}_weightdecay{args.weight_decay}_{small_dataset}"
 
 results_path = os.path.join(args.results_path, name)
 os.makedirs(results_path, exist_ok=True)
 
 paths = {   'output_file': os.path.join(results_path, 'output.txt'),
-            'plot_kfold_path': os.path.join(results_path, 'k_fold_plot.png'),
             'results_path': results_path,
             'train_subset_indices_per_epoch_csv_path': os.path.join(results_path, 'train_subset_indices_per_epoch.csv'),
             'result_best_model_path':os.path.join(results_path, 'best_model'),
@@ -92,7 +94,7 @@ model = torch.nn.SyncBatchNorm.convert_sync_batchnorm(model)
 print(" Preparing DataSet PANDA ...")
 
 with open(paths['log_output_path'], "w") as f:
-        f.write(f"Creating Dataset SICAP \n")
+    f.write(f"Creating Dataset SICAP \n")
 df_train = create_file_label_df(args.data_panda_patches, args.data_panda_path,small_dataset= args.small_dataset, NAME = 'PANDA')
 
 label_mapping = {0: 0, 1: 0, 2: 0, 3: 1, 4: 2, 5: 3}
@@ -124,7 +126,7 @@ time_load = fin__load - inicio__load
 with open(paths['log_output_path'], "a") as f:
     f.write(f"Time for loading data : {time_load} \n")
 
-# =================== WEIGHTS CALCUALTION ===================
+# =================== WEIGHTS CALCULATION ===================
 print(" Preparing Class Weights and hyperpatameters ...")
 primary_weights = compute_class_weights(df_train['gleason_primary_mapped'])
 secondary_weights = compute_class_weights(df_train['gleason_secondary_mapped'])
@@ -134,7 +136,7 @@ sum_weights = primary_weights + secondary_weights
 print(" Preparing Training hyperparamethers ...")
 loss = nn.BCELoss(weight=sum_weights) 
 
-optimizer = optim.AdamW(model.parameters(), lr=args.learning_rate) #weight_decay=1e-2
+optimizer = optim.AdamW(model.parameters(), lr=args.learning_rate, weight_decay=args.weight_decay) #weight_decay=1e-2
 
 scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau( optimizer,
                                     mode="min",  # porque usamos val_loss (minimizar)
