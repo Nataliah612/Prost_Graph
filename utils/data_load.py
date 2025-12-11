@@ -174,12 +174,27 @@ class WSI_Dataset(Dataset):
             return imgs_tensor, label
 
 def collate_fn(batch):
-    features, labels = zip(*batch)
-
-    list_features = list(features) # features: tuple de tensores de distinta longitud -> devolvemos como lista
-    labels = torch.stack(labels, dim=0) # Convertir labels a tensor
-    return list_features, labels
-
+    """
+    batch: lista de tuplas:
+        - (features_tensor, label_tensor)
+        - o (features_tensor, label_tensor, patch_id, coords)
+    Devuelve:
+        - list_features: lista de tensores por WSI
+        - labels: tensor [batch_size, ...]
+        - patch_ids: lista (opcional, None si no hay)
+        - coords: lista (opcional, None si no hay)
+    """
+    # Determinar si batch incluye patch_id y coords
+    if len(batch[0]) == 2:
+        # Normal
+        features, labels = zip(*batch)
+        return list(features), torch.stack(labels, dim=0), None, None
+    elif len(batch[0]) == 4:
+        features, labels,patch_ids, coords = zip(*batch)
+        return list(features), torch.stack(labels, dim=0), list(patch_ids), list(coords)
+    else:
+        raise ValueError(f"Batch con estructura inesperada")
+    
 def extractor(dataloader):
     for features, labels in dataloader:
         return features, labels 
