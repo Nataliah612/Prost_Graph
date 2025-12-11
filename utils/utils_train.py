@@ -1,5 +1,5 @@
 import torch
-
+import pandas as pd
 import numpy as np 
 import os 
 import random
@@ -7,23 +7,8 @@ from tqdm import tqdm
 import sys 
 import math
 
-from torch.cuda.amp import autocast
-
 from models.keep_model import device
-from utils.utils_metrics import compute_all_gleason_metrics, compute_metrics
-
-import torch
-import torch.nn as nn
-import os
-import pandas as pd
-import random
-import numpy as np
-import sys
-import math
-
-from tqdm import tqdm
-
-from safetensors.torch import load_file as load_safetensors
+from utils.utils_metrics import compute_all_gleason_metrics, compute_metrics, compute_multilabel_metrics
     
 def set_multiple_seed(seed: int = 42, deterministic: bool = True):
     """
@@ -193,8 +178,10 @@ def select_gleason_grades_from_batch_proportions(proportions, tumor_abs_thresh=0
 
 def run_epoch(model, dataloader, device, accelerator, 
               loss_BCE, optimizer=None, 
-              args=None, mode="train",inference_heatmap = False,
-              y_prob_threshold=None, tumor_abs_threshold=None, alpha_pe=None, alpha_pc=None):
+              args=None, mode="train",
+              inference_heatmap = False,
+              multilabel_prob_threshold=None, tumor_abs_threshold=None,
+              alpha_pe=None, alpha_pc=None):
     """
     Ejecuta una época completa (train, val o test) y devuelve métricas y pérdida media.
 
@@ -207,8 +194,11 @@ def run_epoch(model, dataloader, device, accelerator,
         optimizer: optimizador (solo requerido si mode='train').
         args: argumentos con alpha_pe y alpha_pc.
         mode (str): 'train', 'val' o 'test'.
-        y_prob_threshold (float): umbral de probabilidad para clasificación multilabel. Si es None, se usa args.y_prob_threshold.
+        inference_heatmap (bool): si True, devuelve información para poder generar mapas de calor.
+        multilabel_prob_threshold (float): umbral de probabilidad para clasificación multilabel. Si es None, se usa args.multilabel_prob_threshold.
         tumor_abs_threshold (float): umbral absoluto de proporción tumoral. Si es None, se usa args.tumor_abs_threshold.
+        alpha_pe (float): peso de la restricción Positive Expansion. Si es None, se usa args.alpha_pe.
+        alpha_pc (float): peso de la restricción Proportion Constraint. Si es None, se usa args.alpha_pc.
 
     Returns:
         dict: métricas calculadas.
@@ -222,15 +212,16 @@ def run_epoch(model, dataloader, device, accelerator,
     all_probs, all_y_true_onehot = [],[]
     all_wsi_proportions = []
 
-    test_output = []
+    heatmap_list = []
     total_loss_sum = 0.0
     total_seen = torch.tensor(0, device=device)
     
-    # Umbrales por defecto si no se proporcionan
-    if y_prob_threshold is None and tumor_abs_threshold is None:
-        y_prob_threshold = args.y_prob_thresh
-        tumor_abs_threshold = args.tumor_abs_thresh
-    if alpha_pc is None and alpha_pe is None:
+    # Valores de linea de comandos si no se proporcionan como argumentos
+    if multilabel_prob_threshold is None or tumor_abs_threshold is None:
+        multilabel_prob_threshold = args.multilabel_prob_threshold
+        tumor_abs_threshold = args.tumor_abs_threshold
+
+    if alpha_pc is None or alpha_pe is None:
         alpha_pe = args.alpha_pe
         alpha_pc = args.alpha_pc
 
@@ -241,12 +232,10 @@ def run_epoch(model, dataloader, device, accelerator,
     torch.set_grad_enabled(mode == "train")
     
     for batch_info in tqdm(dataloader, desc=f"{mode.upper()}", disable=not accelerator.is_local_main_process, file=sys.stdout):
-        # inputs: list of tensors [N_patches, C, H, W]
-        # y: tensor [batch, 2]
         if inference_heatmap:
-            patch_id, inputs, y, coords = batch_info
+            inputs, y, patch_id, coords = batch_info
         else:
-            inputs, y = batch_info
+            inputs, y, _, _= batch_info # inputs: list of tensors [N_patches, C, H, W], y: tensor [batch, 2]
 
         # Mover etiquetas al device
         y_primary = y[:, 0].to(device)
@@ -259,7 +248,8 @@ def run_epoch(model, dataloader, device, accelerator,
 
         # --- Forward ---
         # (El modelo mueve internamente los inputs al device)
-        wsi_prediction, patchs_prediction = model(inputs) # wsi_prediction: Tensor (B,4) , patchs_prediction: list of B tensors, cada uno (N_patches,4)
+        wsi_prediction, patchs_prediction, weights_tensor_list = model(inputs) # wsi_prediction: Tensor (B,4) , patchs_prediction: list of B tensors, cada uno (N_patches,4), 
+                                                                                # weights_tensor_list: list of B tensors, cada uno (N_patches,) o None si no aplica
 
         # --- Cálculo de proporciones por WSI (media de probabilidades por parche) ---
         # Si algún WSI tuviera 0 parches, usamos vector ceros (Aunque eso debería evitarse)
@@ -267,6 +257,11 @@ def run_epoch(model, dataloader, device, accelerator,
             p.mean(dim=0) if p.numel() > 0 else torch.zeros(wsi_prediction.size(1), device=wsi_prediction.device)
             for p in patchs_prediction
         ], dim=0)  # (B,4)
+
+        # print("\n[EPOCH] WSI prediction:", wsi_prediction.shape)
+        # for i, p in enumerate(patchs_prediction):
+        #     print(f"[EPOCH]  WSI {i} patch preds shape: {p.shape}")
+        # print("[EPOCH] wsi_proportions:", wsi_proportions.shape)
 
         # --- Cálculo de pérdidas ---
         loss = loss_BCE(wsi_prediction, y_onehot)
@@ -307,8 +302,9 @@ def run_epoch(model, dataloader, device, accelerator,
                     "slide_id": patch_id[i],
                     "coords": coords[i],
                     "scores": torch.argmax(patchs_prediction[i], dim=1).cpu().numpy(), 
+                    "weights": weights_tensor_list[i]
                     }
-                test_output.append(slide_out)
+                heatmap_list.append(slide_out)
 
     # --- Métricas de la época ---
     total_seen = accelerator.reduce(total_seen, reduction="sum").item()
@@ -323,22 +319,43 @@ def run_epoch(model, dataloader, device, accelerator,
     y_onehot = torch.cat(all_y_true_onehot).numpy()
 
     # --- Calcular métricas ---
-    metrics = compute_all_gleason_metrics(  y_true_primary=y_true1,
-                                            y_pred_primary=y_pred1,
-                                            y_true_secondary=y_true2,
-                                            y_pred_secondary=y_pred2,
-                                            y_true_onehot=y_onehot,
-                                            y_probs=probs,y_prob_threshold = y_prob_threshold)
+    metrics = compute_all_gleason_metrics(
+        y_true_primary=y_true1, y_pred_primary=y_pred1,
+        y_true_secondary=y_true2, y_pred_secondary=y_pred2,
+        y_true_onehot=y_onehot, y_probs=probs, multilabel_prob_threshold = multilabel_prob_threshold)
     
+     # Inicializar valores opcionales
+    val_multilabel_prob_threshold = None
+    val_tumor_abs_threshold = None
+    heatmap_dataframe = None
+
+    # Ajustes específicos de modo
     if mode == 'val':
-        val_metrics, y_prob_threshold= selecting_prob_thresholds(y_true1, y_pred1, y_true2, y_pred2, y_onehot, probs)
-        metrics_global, tumor_abs_threshold=selecting_abs_threshold(all_wsi_proportions,y_true1, y_true2)
-        return metrics, epoch_loss, y_prob_threshold, tumor_abs_threshold
+        val_metrics, val_multilabel_prob_threshold = select_multilabel_prob_threshold(y_onehot, probs)
+        metrics_global, val_tumor_abs_threshold = selecting_abs_threshold(all_wsi_proportions, y_true1, y_true2)
     if inference_heatmap:
-        test_output= pd.DataFrame(test_output)
-        return metrics, epoch_loss, test_output
-    else:
-        return metrics, epoch_loss
+        heatmap_dataframe = pd.DataFrame(heatmap_list)
+    # --- Return centralizado ---
+    return metrics, epoch_loss, val_multilabel_prob_threshold, val_tumor_abs_threshold, heatmap_dataframe
+    
+def select_multilabel_prob_threshold(y_onehot, probs):
+    best_score= -1
+    best_multilabel_metrics ={}
+    best_multilabel_prob_threshold = None
+
+    thresh_list = [0.1, 0.15, 0.2, 0.25, 0.3, 0.35, 0.4, 0.45, 0.5, 0.55, 0.6, 0.65, 0.7]
+    for multilabel_prob_threshold in thresh_list:
+        metrics = compute_multilabel_metrics(
+            y_true_onehot=y_onehot,
+            y_prob=probs,
+            multilabel_prob_threshold = multilabel_prob_threshold)
+        score= metrics["f1_macro"] 
+        if score> best_score :
+            best_score = score
+            best_multilabel_metrics = metrics
+            best_multilabel_prob_threshold = multilabel_prob_threshold
+
+    return best_multilabel_metrics, best_multilabel_prob_threshold 
 
 def selecting_prob_thresholds(y_true1, y_pred1, y_true2, y_pred2, y_onehot, probs):
     # Primero obtenemos un forward completo

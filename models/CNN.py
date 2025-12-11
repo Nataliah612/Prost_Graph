@@ -63,7 +63,7 @@ class CNNEmbedder(nn.Module):
 
         chunks = torch.split(all_patches, self.chunk_size, dim=0)
         
-        all_features, all_probs, features_list = [], []
+        all_features, features_list = [], []
 
         # 4. Procesar chunk a chunk en GPU
         for chunk in chunks:

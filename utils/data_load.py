@@ -169,7 +169,7 @@ class WSI_Dataset(Dataset):
         imgs_tensor = torch.stack([self.transform(Image.fromarray(img)) for img in imgs ])
 
         if self.inference_heatmap:
-                return patch_id, imgs_tensor, label, coords
+                return imgs_tensor, label,patch_id, coords
         else:
             return imgs_tensor, label
 
@@ -190,7 +190,7 @@ def collate_fn(batch):
         features, labels = zip(*batch)
         return list(features), torch.stack(labels, dim=0), None, None
     elif len(batch[0]) == 4:
-        features, labels,patch_ids, coords = zip(*batch)
+        features,labels, patch_ids, coords = zip(*batch)
         return list(features), torch.stack(labels, dim=0), list(patch_ids), list(coords)
     else:
         raise ValueError(f"Batch con estructura inesperada")
