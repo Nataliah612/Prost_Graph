@@ -235,7 +235,7 @@ try:
 except Exception as e:
     print(f"Error cargando checkpoint de accelerate: {e}")
 
-test_metrics, test_loss = run_epoch(model, test_loader, device, accelerator, loss, None, mode='test',args=args, multilabel_prob_threshold=best_y_multilabel_prob_threshold, tumor_abs_threshold=best_tumor_abs_threshold)   
+test_metrics, test_loss = run_epoch(model, test_loader, device, accelerator, loss, None, mode='test',args=args, multilabel_prob_threshold=best_y_multilabel_prob_threshold, tumor_abs_thresh=best_tumor_abs_threshold)   
 
 accelerator.wait_for_everyone()
     
