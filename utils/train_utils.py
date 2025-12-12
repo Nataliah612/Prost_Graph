@@ -8,7 +8,7 @@ import sys
 import math
 
 from models.keep_model import device
-from utils.utils_metrics import compute_all_gleason_metrics, compute_metrics, compute_multilabel_metrics
+from utils.metrics_utils import compute_all_gleason_metrics, compute_metrics, compute_multilabel_metrics
     
 def set_multiple_seed(seed: int = 42, deterministic: bool = True):
     """

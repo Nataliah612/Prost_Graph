@@ -95,7 +95,7 @@ def draw_gt_patches(orig_img, df_patch_class, file_name, mask_folder="/workspace
     # --- DEFINIR COLORES POR VALOR DE GRIS ---
     # Ajusta aquí los colores para cada clase:
     color_map = {
-        50:  (255, 255, 0),      # Verde       → Grado 3
+        50:  (255, 255, 0),      # Verde     → Grado 3
         100: (255, 128, 0),    # Amarillo    → Grado 4
         150: (255, 128, 0),    # Naranja     → Grado 4 cribiforme
         200: (255, 0, 0),      # Rojo        → Grado 5

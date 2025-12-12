@@ -18,8 +18,8 @@ from models.keep_model import get_keep_ia3_model
 from models.CNN import CNNEmbedder
 
 from utils.data_load import create_file_label_df, WSI_Dataset, collate_fn
-from utils.utils_train import run_epoch, compute_class_weights, set_multiple_seed
-from utils.utils_metrics import log_epoch_metrics, save_metrics_to_csv
+from utils.train_utils import run_epoch, compute_class_weights, set_multiple_seed
+from Prost_Graph.utils.metrics_utils import log_epoch_metrics, save_metrics_to_csv
 
 os.environ["ACCELERATE_DISABLE_TRANSFORMER_ENGINE"] = "1"
 os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "max_split_size_mb:128"

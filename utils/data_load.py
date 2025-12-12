@@ -1,18 +1,17 @@
 
 import numpy as np 
-import os
 import pandas as pd
+import os
 
 import torch
 from torch.utils.data import Dataset
 from torchvision import transforms as T
 
 import h5py
-from PIL import Image
-
 import gc
-from tqdm import tqdm
 import sys
+from PIL import Image
+from tqdm import tqdm
 
 def create_file_label_df(images_path, data_path, NAME='',small_dataset=False ,slide_col='image_id'):
     patch_list,patient_list  = [], []
