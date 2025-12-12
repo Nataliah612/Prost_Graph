@@ -23,8 +23,8 @@ class model_graph(nn.Module):
         """ x: tensor (B, N, D) """
         graphs_list = [grafo_fully_connected(xi.squeeze(dim=1)) for xi in x]
        
-        out, w1 = self.graphgat(graphs_list)
-        return out, w1
+        out, patch_list,w1 = self.graphgat(graphs_list)
+        return out, patch_list, w1
 
 def grafo_fully_connected(x):
     num_nodos = x.shape[0]
@@ -80,8 +80,9 @@ class gat(torch.nn.Module):
 
         idx = torch.repeat_interleave(torch.arange(len(lengths), device=weighted.device), lengths)
         out_wsi = torch.zeros(len(lengths), weighted.size(1), device=weighted.device).index_add_(0, idx, weighted)
-
-        return out_wsi, patch_output
+        #weight_wsi = torch.zeros(len(lengths), w.size(), device=w.device).index_add_(0, idx, w)
+        weight_wsi = torch.split(w, lengths.tolist(), dim=0)
+        return out_wsi, patch_output, weight_wsi
 
 class Aggregate_Attnt(nn.Module):
     def __init__(self, L=512, I=1):
