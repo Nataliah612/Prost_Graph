@@ -21,6 +21,7 @@ from utils.data_load import create_file_label_df, WSI_Dataset, collate_fn
 from utils.utils_train import run_epoch, compute_class_weights, set_multiple_seed
 from utils.utils_metrics import log_epoch_metrics, save_metrics_to_csv
 
+os.environ["ACCELERATE_DISABLE_TRANSFORMER_ENGINE"] = "1"
 os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "max_split_size_mb:128"
 gc.collect()
 
@@ -51,7 +52,7 @@ def parse_args():
     parser.add_argument("--seed", type=int, default=98, help="Semilla aleatoria")
     parser.add_argument("--num_workers", type=int, default=2, help="Numero de paralelizaciones")
 
-    parser.add_argument("--y_prob_thresh", default=0.4, type=float)
+    parser.add_argument("--multilabel_prob_threshold", default=0.4, type=float)
     parser.add_argument("--tumor_abs_thresh", default=0.15, type=float)
     parser.add_argument("--alpha_pe", default=0.01, type=float)
     parser.add_argument("--alpha_pc", default=0.01, type=float)
@@ -180,9 +181,9 @@ for epoch in range(args.epochs):
                 writer.writerow([epoch, current_indices])
         data_train.update_random_subset()
     # VALIDATION
-    val_metrics, val_loss, y_multilabel_prob_threshold, tumor_abs_threshold,_ = run_epoch(model, val_loader, device, accelerator, loss, None, mode='val', args=args)
+    val_metrics, val_loss, y_multilabel_prob_threshold, tumor_abs_thresh,_ = run_epoch(model, val_loader, device, accelerator, loss, None, mode='val', args=args)
                                                                                     
-    print("Selected thresholds - y_prob_threshold:", y_multilabel_prob_threshold, " tumor_abs_threshold:", tumor_abs_threshold, flush=True)
+    print("Selected thresholds - multilabel_prob_threshold:", y_multilabel_prob_threshold, " tumor_abs_threshold:", tumor_abs_thresh, flush=True)
         
     if accelerator.is_main_process:
         log_epoch_metrics(epoch, "Validation", val_metrics, val_loss, paths['log_output_path'])
@@ -194,7 +195,7 @@ for epoch in range(args.epochs):
     accelerator.wait_for_everyone()
     if val_loss < best_validation_loss:
         best_validation_loss, no_improve = val_loss, 0
-        best_y_multilabel_prob_threshold, best_tumor_abs_threshold = y_multilabel_prob_threshold, tumor_abs_threshold
+        best_y_multilabel_prob_threshold, best_tumor_abs_threshold = y_multilabel_prob_threshold, tumor_abs_thresh
         accelerator.save_state(paths['result_best_model_path'])
         if accelerator.is_main_process:
             print(f"Mejora de rendimiento. Mejor modelo guardado en {paths['result_best_model_path']} con val_loss: {best_validation_loss:.4f}", flush=True)
@@ -234,7 +235,7 @@ try:
 except Exception as e:
     print(f"Error cargando checkpoint de accelerate: {e}")
 
-test_metrics, test_loss = run_epoch(model, test_loader, device, accelerator, loss, None, mode='test',args=args, y_prob_threshold=best_y_multilabel_prob_threshold, tumor_abs_threshold=best_tumor_abs_threshold)   
+test_metrics, test_loss = run_epoch(model, test_loader, device, accelerator, loss, None, mode='test',args=args, multilabel_prob_threshold=best_y_multilabel_prob_threshold, tumor_abs_threshold=best_tumor_abs_threshold)   
 
 accelerator.wait_for_everyone()
     
@@ -259,7 +260,7 @@ if args.inference == True:
     print("Loading embeddings for Inference ...")
     inference_loader = DataLoader(WSI_Dataset(df_test, df_test.index), shuffle=False, **dl_kwargs)
 
-    inference_metrics, inference_loss = run_epoch(model, inference_loader, device, accelerator, loss, None, mode='test',args=args, y_prob_threshold=best_y_multilabel_prob_threshold, tumor_abs_threshold=best_tumor_abs_threshold)   
+    inference_metrics, inference_loss = run_epoch(model, inference_loader, device, accelerator, loss, None, mode='test',args=args, multilabel_prob_threshold=best_y_multilabel_prob_threshold, tumor_abs_thresh=best_tumor_abs_threshold)   
 
     accelerator.wait_for_everyone()
     

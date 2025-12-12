@@ -58,7 +58,7 @@ def compute_metrics(y_true, y_pred):
 
             "kappa": kappa}
 
-def compute_multilabel_metrics(y_true_onehot, y_prob, y_prob_threshold=0.4):
+def compute_multilabel_metrics(y_true_onehot, y_prob, multilabel_prob_threshold=0.4):
     """
     Métricas para clasificación multietiqueta.
 
@@ -72,7 +72,7 @@ def compute_multilabel_metrics(y_true_onehot, y_prob, y_prob_threshold=0.4):
         y_prob = y_prob.cpu().numpy()
 
     # Predicciones binarias aplicando umbral
-    y_pred = (y_prob >= y_prob_threshold).astype(int)
+    y_pred = (y_prob >= multilabel_prob_threshold).astype(int)
 
     metrics = {}
 
@@ -113,7 +113,7 @@ def compute_multilabel_metrics(y_true_onehot, y_prob, y_prob_threshold=0.4):
     return metrics
 
 def compute_all_gleason_metrics(y_true_primary, y_pred_primary,
-                                y_true_secondary, y_pred_secondary, y_true_onehot=None,y_probs=None, y_prob_threshold=0.4):
+                                y_true_secondary, y_pred_secondary, y_true_onehot=None,y_probs=None, multilabel_prob_threshold=0.4):
     """
     Calcula las métricas para Gleason primario, secundario y global.
     
@@ -146,7 +146,7 @@ def compute_all_gleason_metrics(y_true_primary, y_pred_primary,
 
      # --- Multilabel ---
     if y_true_onehot is not None and y_probs is not None:
-        metrics["multilabel"] = compute_multilabel_metrics(y_true_onehot, y_probs, y_prob_threshold=y_prob_threshold)
+        metrics["multilabel"] = compute_multilabel_metrics(y_true_onehot, y_probs, multilabel_prob_threshold=multilabel_prob_threshold)
 
     return metrics
 

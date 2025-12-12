@@ -6,8 +6,8 @@ import pandas as pd
 import torch
 from torch.utils.data import Dataset
 from torchvision import transforms as T
-import h5py
 
+import h5py
 from PIL import Image
 
 import gc
@@ -157,7 +157,7 @@ class WSI_Dataset(Dataset):
         # MODO PRECARGA CPU
         if not self.load_on_demand:
             if self.inference_heatmap:
-                return patch_id, self.images[pos], label, coords
+                return self.images[pos], label, patch_id,coords
             else:
                 return self.images[pos], label
 
@@ -169,7 +169,7 @@ class WSI_Dataset(Dataset):
         imgs_tensor = torch.stack([self.transform(Image.fromarray(img)) for img in imgs ])
 
         if self.inference_heatmap:
-                return imgs_tensor, label,patch_id, coords
+            return imgs_tensor, label,patch_id, coords
         else:
             return imgs_tensor, label
 

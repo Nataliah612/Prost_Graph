@@ -180,7 +180,7 @@ def run_epoch(model, dataloader, device, accelerator,
               loss_BCE, optimizer=None, 
               args=None, mode="train",
               inference_heatmap = False,
-              multilabel_prob_threshold=None, tumor_abs_threshold=None,
+              multilabel_prob_threshold=None, tumor_abs_thresh=None,
               alpha_pe=None, alpha_pc=None):
     """
     Ejecuta una época completa (train, val o test) y devuelve métricas y pérdida media.
@@ -217,9 +217,9 @@ def run_epoch(model, dataloader, device, accelerator,
     total_seen = torch.tensor(0, device=device)
     
     # Valores de linea de comandos si no se proporcionan como argumentos
-    if multilabel_prob_threshold is None or tumor_abs_threshold is None:
+    if multilabel_prob_threshold is None or tumor_abs_thresh is None:
         multilabel_prob_threshold = args.multilabel_prob_threshold
-        tumor_abs_threshold = args.tumor_abs_threshold
+        tumor_abs_thresh = args.tumor_abs_thresh
 
     if alpha_pc is None or alpha_pe is None:
         alpha_pe = args.alpha_pe
@@ -248,7 +248,7 @@ def run_epoch(model, dataloader, device, accelerator,
 
         # --- Forward ---
         # (El modelo mueve internamente los inputs al device)
-        wsi_prediction, patchs_prediction, weights_tensor_list = model(inputs) # wsi_prediction: Tensor (B,4) , patchs_prediction: list of B tensors, cada uno (N_patches,4), 
+        wsi_prediction, patchs_prediction = model(inputs) # wsi_prediction: Tensor (B,4) , patchs_prediction: list of B tensors, cada uno (N_patches,4), 
                                                                                 # weights_tensor_list: list of B tensors, cada uno (N_patches,) o None si no aplica
 
         # --- Cálculo de proporciones por WSI (media de probabilidades por parche) ---
@@ -284,7 +284,7 @@ def run_epoch(model, dataloader, device, accelerator,
         if mode =='val':
             all_wsi_proportions.append(wsi_proportions.detach().cpu())
                            
-        pred_primary, pred_secondary = select_gleason_grades_from_batch_proportions(wsi_proportions, tumor_abs_threshold)
+        pred_primary, pred_secondary = select_gleason_grades_from_batch_proportions(wsi_proportions, tumor_abs_thresh)
 
         # --- Probabilidades asociadas ---
         probs = wsi_prediction.detach().cpu()
@@ -302,7 +302,7 @@ def run_epoch(model, dataloader, device, accelerator,
                     "slide_id": patch_id[i],
                     "coords": coords[i],
                     "scores": torch.argmax(patchs_prediction[i], dim=1).cpu().numpy(), 
-                    "weights": weights_tensor_list[i]
+                    #"weights": weights_tensor_list[i]
                     }
                 heatmap_list.append(slide_out)
 
