@@ -42,7 +42,7 @@ def parse_args():
 
     parser.add_argument("--results_path", type=str, default='/workspace/results', help="Ruta donde se guardaran los resultados")
 
-    parser.add_argument("--batch_size", type=int, default=4, help="Tamaño de batch")
+    parser.add_argument("--batch_size", type=int, default=16, help="Tamaño de batch")
     parser.add_argument("--learning_rate", type=float, default=1e-4, help="Learning rate")
     parser.add_argument("--weight_decay", type=float, default=1e-2, help="Weight decay")
     parser.add_argument("--momentum", type=float, default=0.99, help="Momentum")
@@ -235,7 +235,7 @@ try:
 except Exception as e:
     print(f"Error cargando checkpoint de accelerate: {e}")
 
-test_metrics, test_loss = run_epoch(model, test_loader, device, accelerator, loss, None, mode='test',args=args, multilabel_prob_threshold=best_y_multilabel_prob_threshold, tumor_abs_thresh=best_tumor_abs_threshold)   
+test_metrics, test_loss, _,_,_ = run_epoch(model, test_loader, device, accelerator, loss, None, mode='test',args=args, multilabel_prob_threshold=best_y_multilabel_prob_threshold, tumor_abs_thresh=best_tumor_abs_threshold)   
 
 accelerator.wait_for_everyone()
     
@@ -260,7 +260,7 @@ if args.inference == True:
     print("Loading embeddings for Inference ...")
     inference_loader = DataLoader(WSI_Dataset(df_test, df_test.index), shuffle=False, **dl_kwargs)
 
-    inference_metrics, inference_loss = run_epoch(model, inference_loader, device, accelerator, loss, None, mode='test',args=args, multilabel_prob_threshold=best_y_multilabel_prob_threshold, tumor_abs_thresh=best_tumor_abs_threshold)   
+    inference_metrics, inference_loss,_,_,_ = run_epoch(model, inference_loader, device, accelerator, loss, None, mode='test',args=args, multilabel_prob_threshold=best_y_multilabel_prob_threshold, tumor_abs_thresh=best_tumor_abs_threshold)   
 
     accelerator.wait_for_everyone()
     
