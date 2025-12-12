@@ -42,7 +42,7 @@ def parse_args():
 
     parser.add_argument("--results_path", type=str, default='/workspace/results', help="Ruta donde se guardaran los resultados")
 
-    parser.add_argument("--batch_size", type=int, default=16, help="Tamaño de batch")
+    parser.add_argument("--batch_size", type=int, default=4, help="Tamaño de batch")
     parser.add_argument("--learning_rate", type=float, default=1e-4, help="Learning rate")
     parser.add_argument("--weight_decay", type=float, default=1e-2, help="Weight decay")
     parser.add_argument("--momentum", type=float, default=0.99, help="Momentum")
