@@ -22,6 +22,7 @@ from utils.train_utils import run_epoch, compute_class_weights, set_multiple_see
 from Prost_Graph.utils.metrics_utils import log_epoch_metrics, save_metrics_to_csv
 
 os.environ["ACCELERATE_DISABLE_TRANSFORMER_ENGINE"] = "1"
+os.environ["ACCELERATE_DISABLE_TE"] = "1"
 os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "max_split_size_mb:128"
 gc.collect()
 
