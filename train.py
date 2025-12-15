@@ -10,7 +10,8 @@ import gc
 import csv
 import time 
 import argparse
-
+os.environ["ACCELERATE_DISABLE_TRANSFORMER_ENGINE"] = "1"
+os.environ["ACCELERATE_DISABLE_TE"] = "1"
 from accelerate import Accelerator
 import sys
 sys.modules["transformer_engine"] = None
@@ -23,8 +24,6 @@ from utils.data_load import create_file_label_df, WSI_Dataset, collate_fn
 from utils.train_utils import run_epoch, compute_class_weights, set_multiple_seed
 from utils.metrics_utils import log_epoch_metrics, save_metrics_to_csv
 
-os.environ["ACCELERATE_DISABLE_TRANSFORMER_ENGINE"] = "1"
-os.environ["ACCELERATE_DISABLE_TE"] = "1"
 os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "max_split_size_mb:128"
 gc.collect()
 
