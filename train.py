@@ -12,6 +12,8 @@ import time
 import argparse
 
 from accelerate import Accelerator
+import sys
+sys.modules["transformer_engine"] = None
 
 # =============== IMPORT FUNCIONES ======================
 from models.keep_model import get_keep_ia3_model
