@@ -1,8 +1,3 @@
-# PyTorch stack
-#torch==2.1.2
-#torchvision==0.16.2
-#torchaudio==2.1.2
-
 # PyTorch Geometric
 torch-geometric==2.5.2
 torch==2.1.0 
@@ -10,9 +5,8 @@ torchvision==0.16.0
 torchtext==0.16.0 
 torchdata==0.7.0
 
-# Transformerspip install torch==2.1.2
-transformer-engine==1.5.0
-
+# Transformers
+#transformer-engine==1.5.0
 transformers==4.40.2
 peft==0.10.0
 accelerate==0.29.2

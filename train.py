@@ -19,7 +19,7 @@ from models.CNN import CNNEmbedder
 
 from utils.data_load import create_file_label_df, WSI_Dataset, collate_fn
 from utils.train_utils import run_epoch, compute_class_weights, set_multiple_seed
-from Prost_Graph.utils.metrics_utils import log_epoch_metrics, save_metrics_to_csv
+from utils.metrics_utils import log_epoch_metrics, save_metrics_to_csv
 
 os.environ["ACCELERATE_DISABLE_TRANSFORMER_ENGINE"] = "1"
 os.environ["ACCELERATE_DISABLE_TE"] = "1"
