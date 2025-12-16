@@ -272,14 +272,17 @@ test_loader = DataLoader(WSI_Dataset(df_train, test_idx), shuffle=False, **dl_kw
 fin__load = time.time()
 
 time_load = fin__load - inicio__load
+for j in ['graph', 'mlp', 'mean_aggre']:
+    for i in ['keep', 'cnn']:
+        try:
+            if i == 'keep':
+                for p in ['si', 'no']:
+                    runing_for(p, i, j, train_loader, val_loader, test_loader, args=args)
+            else:
+                args.batch_size = 64
+                p = 'no'
+                runing_for(p, i, j, train_loader, val_loader, test_loader, args=args)
 
-for j in ['graph','mlp','mean_aggre']:
-    for i in ['keep','cnn' ]:
-        if i =='keep':
-            for p in ['si','no']:
-                runing_for(p,i, j, train_loader, val_loader, test_loader, args=args)
-            
-        else:
-            args.batch_size = 64 
-            p = 'no'
-            runing_for(p,i, j,train_loader, val_loader, test_loader,args=args)
+        except Exception as e:
+            print(f"❌ Error con j={j}, i={i}: {e}")
+            continue
