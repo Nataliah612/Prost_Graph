@@ -278,5 +278,8 @@ for j in ['graph','mlp','mean_aggre']:
         if i =='keep':
             for p in ['si','no']:
                 runing_for(p,i, j, train_loader, val_loader, test_loader, args=args)
+            if j =='graph':
+                continue
         else:
+            p = 'no'
             runing_for(p,i, j,train_loader, val_loader, test_loader,args=args)
