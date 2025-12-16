@@ -274,12 +274,12 @@ fin__load = time.time()
 time_load = fin__load - inicio__load
 
 for j in ['graph','mlp','mean_aggre']:
-    for i in ['cnn' ]:
+    for i in ['keep','cnn' ]:
         if i =='keep':
             for p in ['si','no']:
                 runing_for(p,i, j, train_loader, val_loader, test_loader, args=args)
-            if j =='graph':
-                continue
+            
         else:
+            args.batch_size = 64 
             p = 'no'
             runing_for(p,i, j,train_loader, val_loader, test_loader,args=args)
