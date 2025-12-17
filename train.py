@@ -64,10 +64,10 @@ def runing_for(p,extractor, model,train_loader, val_loader, test_loader,inferenc
     pretrain = True if p=='si' else False
     # =================== PATHS DEFINITION ===================
     print(" Defining Paths ...")
-    pretrain= "_pretrain" if pretrain==True else ""
+    pretrain_= "_pretrain" if pretrain==True else ""
     random_subset = "_random_subset" if args.random_subset==True else ""
     small_dataset = "_small_dataset" if args.small_dataset==True else ""
-    name = f"try_{extractor}_{model}_lr_{args.learning_rate}_bz_{args.batch_size}_epochs_{args.epochs}{pretrain}{random_subset}_weightdecay{args.weight_decay}{small_dataset}"
+    name = f"try_{extractor}_{model}_lr_{args.learning_rate}_bz_{args.batch_size}_epochs_{args.epochs}{pretrain_}{random_subset}_weightdecay{args.weight_decay}{small_dataset}"
 
     results_path = os.path.join(args.results_path, name)
     os.makedirs(results_path, exist_ok=True)
@@ -84,7 +84,7 @@ def runing_for(p,extractor, model,train_loader, val_loader, test_loader,inferenc
     if extractor == 'cnn':
         model = CNNEmbedder(clasification_model = model)
     elif extractor =='keep': 
-        model = get_keep_ia3_model(clasification_model = model, pretrain=p).to(device)
+        model = get_keep_ia3_model(clasification_model = model, pretrain=pretrain).to(device)
         model = torch.nn.SyncBatchNorm.convert_sync_batchnorm(model)
 
 
@@ -277,7 +277,7 @@ for j in ['graph', 'mlp', 'mean_aggre']:
     for i in ['keep']:
         try:
             if i == 'keep':
-                for p in ['si']:
+                for p in ['si','no']:
                     runing_for(p, i, j, train_loader, val_loader, test_loader,inference_loader, args=args)
             else:
                 args.batch_size = 64
