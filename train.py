@@ -60,11 +60,11 @@ def parse_args():
     parser.add_argument("--alpha_pc", default=0.01, type=float)
 
     return parser.parse_args( )
-def runing_for(p,extractor, model,train_loader, val_loader, test_loader, args):
+def runing_for(p,extractor, model,train_loader, val_loader, test_loader,inference_loader, args):
     pretrain = True if p=='si' else False
     # =================== PATHS DEFINITION ===================
     print(" Defining Paths ...")
-    pretrain= "_pretrain" if args.pretrain==True else ""
+    pretrain= "_pretrain" if pretrain==True else ""
     random_subset = "_random_subset" if args.random_subset==True else ""
     small_dataset = "_small_dataset" if args.small_dataset==True else ""
     name = f"try_{extractor}_{model}_lr_{args.learning_rate}_bz_{args.batch_size}_epochs_{args.epochs}{pretrain}{random_subset}_weightdecay{args.weight_decay}{small_dataset}"
@@ -209,16 +209,7 @@ def runing_for(p,extractor, model,train_loader, val_loader, test_loader, args):
             f.write(f"Inference in SICAP \n")
         print(f"Inference in BBDD : SICAP")
             
-        df_test = create_file_label_df(args.data_sicap_patches, args.data_sicap_path, NAME = 'SICAP')
-
-        label_mapping = {0: 0, 1: 0, 2: 0, 3: 1, 4: 2, 5: 3}
-        df_test['gleason_primary_mapped'] = df_test['gleason_primary'].map(label_mapping)
-        df_test['gleason_secondary_mapped'] = df_test['gleason_secondary'].map(label_mapping)
-        df_test['gleason_score'] = df_test['gleason_score'].astype(int)
-
-        print("Loading embeddings for Inference ...")
-        inference_loader = DataLoader(WSI_Dataset(df_test, df_test.index), shuffle=False, **dl_kwargs)
-
+        
         inference_metrics, inference_loss,_,_,_ = run_epoch(model, inference_loader, device, accelerator, loss, None, mode='test',args=args, multilabel_prob_threshold=best_y_multilabel_prob_threshold, tumor_abs_thresh=best_tumor_abs_threshold)   
 
         accelerator.wait_for_everyone()
@@ -272,16 +263,26 @@ test_loader = DataLoader(WSI_Dataset(df_train, test_idx), shuffle=False, **dl_kw
 fin__load = time.time()
 
 time_load = fin__load - inicio__load
+df_test = create_file_label_df(args.data_sicap_patches, args.data_sicap_path, NAME = 'SICAP')
+
+label_mapping = {0: 0, 1: 0, 2: 0, 3: 1, 4: 2, 5: 3}
+df_test['gleason_primary_mapped'] = df_test['gleason_primary'].map(label_mapping)
+df_test['gleason_secondary_mapped'] = df_test['gleason_secondary'].map(label_mapping)
+df_test['gleason_score'] = df_test['gleason_score'].astype(int)
+
+print("Loading embeddings for Inference ...")
+inference_loader = DataLoader(WSI_Dataset(df_test, df_test.index), shuffle=False, **dl_kwargs)
+
 for j in ['graph', 'mlp', 'mean_aggre']:
-    for i in ['keep', 'cnn']:
+    for i in ['keep']:
         try:
             if i == 'keep':
-                for p in ['si', 'no']:
-                    runing_for(p, i, j, train_loader, val_loader, test_loader, args=args)
+                for p in ['si']:
+                    runing_for(p, i, j, train_loader, val_loader, test_loader,inference_loader, args=args)
             else:
                 args.batch_size = 64
                 p = 'no'
-                runing_for(p, i, j, train_loader, val_loader, test_loader, args=args)
+                runing_for(p, i, j, train_loader, val_loader, test_loader,inference_loader, args=args)
 
         except Exception as e:
             print(f"❌ Error con j={j}, i={i}: {e}")
