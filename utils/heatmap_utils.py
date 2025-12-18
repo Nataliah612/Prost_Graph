@@ -57,7 +57,7 @@ def overlay_heatmap_on_image(orig, heatmap, alpha=0.45):
     
     return Image.blend(orig, heatmap_resized, alpha)
 
-def draw_gt_patches(orig_img, df_patch_class, file_name, mask_folder="/workspace/data/annotation_masks_SICAP", alpha=0.45):
+def draw_gt_patches(orig_img,  file_name, mask_folder="/workspace/data/annotation_masks_SICAP", alpha=0.45):
     """
     Carga una máscara de grises, asigna un color por cada valor de gris y la superpone a la imagen original.
 
@@ -65,7 +65,6 @@ def draw_gt_patches(orig_img, df_patch_class, file_name, mask_folder="/workspace
     ----------
     orig_img : PIL.Image
         Imagen original (ya reescalada).
-    df_patch_class : DataFrame (NO se usa más, pero lo dejo por compatibilidad)
     file_name : str
         Nombre del archivo correspondiente (para buscar la máscara)
     mask_folder : str
@@ -80,7 +79,9 @@ def draw_gt_patches(orig_img, df_patch_class, file_name, mask_folder="/workspace
     """
 
     # Ruta de la máscara en grises
-    mask_path = os.path.join(mask_folder, file_name)#.replace(".jpg", ".png"))
+    print(mask_folder)
+    print(file_name)
+    mask_path = os.path.join(mask_folder, file_name) #.replace(".jpg", ".png"))
 
     if not os.path.exists(mask_path):
         print(f"[WARN] No existe la máscara: {mask_path}")

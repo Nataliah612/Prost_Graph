@@ -87,8 +87,6 @@ def runing_for(p,extractor, model,train_loader, val_loader, test_loader,inferenc
         model = get_keep_ia3_model(clasification_model = model, pretrain=pretrain).to(device)
         model = torch.nn.SyncBatchNorm.convert_sync_batchnorm(model)
 
-
-
     with open(paths['log_output_path'], "a") as f:
         f.write(f"Time for loading data : {time_load} \n")
 
@@ -277,7 +275,7 @@ for j in ['graph', 'mlp', 'mean_aggre']:
     for i in ['keep']:
         try:
             if i == 'keep':
-                for p in ['si','no']:
+                for p in ['si']:#,'no'
                     runing_for(p, i, j, train_loader, val_loader, test_loader,inference_loader, args=args)
             else:
                 args.batch_size = 64

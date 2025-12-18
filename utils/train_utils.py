@@ -248,7 +248,7 @@ def run_epoch(model, dataloader, device, accelerator,
 
         # --- Forward ---
         # (El modelo mueve internamente los inputs al device)
-        wsi_prediction, patchs_prediction = model(inputs) # wsi_prediction: Tensor (B,4) , patchs_prediction: list of B tensors, cada uno (N_patches,4), 
+        wsi_prediction, patchs_prediction, weights_tensor_list = model(inputs) # wsi_prediction: Tensor (B,4) , patchs_prediction: list of B tensors, cada uno (N_patches,4), 
                                                                                 # weights_tensor_list: list of B tensors, cada uno (N_patches,) o None si no aplica
 
         # --- Cálculo de proporciones por WSI (media de probabilidades por parche) ---
@@ -302,7 +302,7 @@ def run_epoch(model, dataloader, device, accelerator,
                     "slide_id": patch_id[i],
                     "coords": coords[i],
                     "scores": torch.argmax(patchs_prediction[i], dim=1).cpu().numpy(), 
-                    #"weights": weights_tensor_list[i]
+                    "weights": weights_tensor_list[i]
                     }
                 heatmap_list.append(slide_out)
 
