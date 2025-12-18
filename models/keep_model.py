@@ -146,7 +146,7 @@ def get_keep_ia3_model(clasification_model = 'graph',pretrain=False):
     
     for name, param in ia3_model.named_parameters():
         if pretrain == True:
-            if "visual.blocks.23.attn.proj.ia3_l" or "visual.blocks.22.attn.proj.ia3_l" or "visual.blocks.21.attn.proj.ia3_l" in name:
+            if "visual.blocks.23.attn.proj.ia3_l" or "visual.blocks.22.attn.proj.ia3_l" in name: # or "visual.blocks.21.attn.proj.ia3_l"
                 param.requires_grad = True
             else:
                 param.requires_grad = False

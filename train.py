@@ -275,7 +275,7 @@ for j in ['graph', 'mlp', 'mean_aggre']:
     for i in ['keep']:
         try:
             if i == 'keep':
-                for p in ['si','no']:#
+                for p in ['si','no']: #
                     runing_for(p, i, j, train_loader, val_loader, test_loader,inference_loader, args=args)
             else:
                 args.batch_size = 64
