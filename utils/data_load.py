@@ -19,7 +19,7 @@ def create_file_label_df(images_path, data_path, NAME='',small_dataset=False ,sl
     gleason_primary_list, gleason_secondary_list  = [], []
     df = pd.read_excel(data_path)
     
-    df = df.head(400) if small_dataset == True else df
+    df = df.head(100) if small_dataset == True else df
 
     wsis = [f for f in os.listdir(images_path) if f.endswith('.h5')]
     for f in tqdm(wsis, desc="Procesando WSIs", file=sys.stdout):

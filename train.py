@@ -273,15 +273,15 @@ inference_loader = DataLoader(WSI_Dataset(df_test, df_test.index), shuffle=False
 
 for j in ['graph', 'mlp', 'mean_aggre']:
     for i in ['keep']:
-        try:
-            if i == 'keep':
-                for p in ['si','no']: #
-                    runing_for(p, i, j, train_loader, val_loader, test_loader,inference_loader, args=args)
-            else:
-                args.batch_size = 64
-                p = 'no'
+        
+        if i == 'keep':
+            for p in ['si','no']: #
                 runing_for(p, i, j, train_loader, val_loader, test_loader,inference_loader, args=args)
+        else:
+            args.batch_size = 64
+            p = 'no'
+            runing_for(p, i, j, train_loader, val_loader, test_loader,inference_loader, args=args)
 
-        except Exception as e:
+        '''except Exception as e:
             print(f"❌ Error con j={j}, i={i}: {e}")
-            continue
+            continue'''
