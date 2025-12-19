@@ -1,14 +1,30 @@
 import torch
+import torch.nn as nn
+import os
 import pandas as pd
-import numpy as np 
-import os 
 import random
-from tqdm import tqdm 
-import sys 
+import numpy as np
+import sys
 import math
 
-from models.keep_model import device
+from tqdm import tqdm
+
+from safetensors.torch import load_file as load_safetensors
+
+from models.CNN import CNNEmbedder
+from models.keep_model import get_keep_ia3_model
 from utils.metrics_utils import compute_all_gleason_metrics, compute_metrics, compute_multilabel_metrics
+
+# CONFIGURACION BASICA 
+device = 'cuda' if torch.cuda.is_available() else 'cpu'
+
+def get_model(patch_encoder_type, classification_mode, pretrain):
+    if patch_encoder_type == "CNN":
+        return CNNEmbedder(classification_mode)
+    elif patch_encoder_type == "KEEP":
+        return get_keep_ia3_model(classification_mode, pretrain) #clasification_model = 'graph',pretrain=False
+    else:
+        raise ValueError("Patch encoder type desconocido: {model_type}")
     
 def set_multiple_seed(seed: int = 42, deterministic: bool = True):
     """
@@ -135,13 +151,14 @@ def loss_restrictions(wsi_proportions: torch.Tensor, alpha_pe: float, alpha_pc: 
     return alpha_pe * loss_pe + alpha_pc * loss_pc
 
 
-def select_gleason_grades_from_batch_proportions(proportions, tumor_abs_thresh=0.05):
+def select_gleason_grades_from_batch_proportions(proportions, min_presence_thresh=0.05, secondary_ratio_thresh=0.3):
     """
     Selecciona grado primario y secundario a partir de un tensor de proporciones.
 
     Args:
         proportions: tensor [Batch_size, 4], columnas [p0, p3, p4, p5]
-        tumor_abs_thresh: umbral mínimo de probabilidad tumoral para considerar WSI como cáncer
+        min_presence_thresh: umbral mínimo de presencia tumoral para considerar WSI como cáncer
+        secondary_ratio_thresh: umbral mínimo de proporción relativa del secundario respecto al primario
 
     Returns:
         primary_grade: tensor [Batch_size], grado primario 
@@ -154,7 +171,7 @@ def select_gleason_grades_from_batch_proportions(proportions, tumor_abs_thresh=0
     tumor_probs = proportions[:, 1:]  # shape: [Batch_size, 3]
     tumor_classes = torch.tensor([1, 2, 3], device=device)
 
-    # Orden descendente por probabilidad tumoral
+    # Orden descendente por proporción tumoral
     sorted_vals, sorted_idx = torch.sort(tumor_probs, dim=1, descending=True)
     primary_idx = sorted_idx[:, 0]
     secondary_idx = sorted_idx[:, 1]
@@ -166,12 +183,12 @@ def select_gleason_grades_from_batch_proportions(proportions, tumor_abs_thresh=0
     secondary_grade = tumor_classes[secondary_idx]  # shape: [Batch_size]
 
     # Casos donde todas las proporciones tumorales son muy bajas -> benigno
-    benign_mask = primary_vals < tumor_abs_thresh
+    benign_mask = primary_vals < min_presence_thresh
     primary_grade[benign_mask] = 0
     secondary_grade[benign_mask] = 0
 
     # Patrones secundarios muy débiles -> se iguala al primario
-    single_mask = (secondary_vals < tumor_abs_thresh) | (secondary_vals < 0.3 * primary_vals)
+    single_mask = (secondary_vals < min_presence_thresh) | (secondary_vals < secondary_ratio_thresh * primary_vals)
     secondary_grade[single_mask] = primary_grade[single_mask]
 
     return primary_grade, secondary_grade
@@ -180,7 +197,7 @@ def run_epoch(model, dataloader, device, accelerator,
               loss_BCE, optimizer=None, 
               args=None, mode="train",
               inference_heatmap = False,
-              multilabel_prob_threshold=None, tumor_abs_thresh=None,
+              multilabel_prob_threshold=None, min_presence_threshold=None, secondary_ratio_threshold=None,
               alpha_pe=None, alpha_pc=None):
     """
     Ejecuta una época completa (train, val o test) y devuelve métricas y pérdida media.
@@ -196,7 +213,8 @@ def run_epoch(model, dataloader, device, accelerator,
         mode (str): 'train', 'val' o 'test'.
         inference_heatmap (bool): si True, devuelve información para poder generar mapas de calor.
         multilabel_prob_threshold (float): umbral de probabilidad para clasificación multilabel. Si es None, se usa args.multilabel_prob_threshold.
-        tumor_abs_threshold (float): umbral absoluto de proporción tumoral. Si es None, se usa args.tumor_abs_threshold.
+        min_presence_threshold (float): Umbral mínimo de presencia tumoral para considerar WSI como cáncer. Si es None, se usa args.min_presence_threshold.
+        secondary_ratio_threshold (float): Umbral mínimo de proporción relativa del secundario respecto al primario. Si es None, se usa args.secondary_ratio_threshold.
         alpha_pe (float): peso de la restricción Positive Expansion. Si es None, se usa args.alpha_pe.
         alpha_pc (float): peso de la restricción Proportion Constraint. Si es None, se usa args.alpha_pc.
 
@@ -217,9 +235,10 @@ def run_epoch(model, dataloader, device, accelerator,
     total_seen = torch.tensor(0, device=device)
     
     # Valores de linea de comandos si no se proporcionan como argumentos
-    if multilabel_prob_threshold is None or tumor_abs_thresh is None:
+    if multilabel_prob_threshold is None or min_presence_threshold is None or secondary_ratio_threshold is None:
         multilabel_prob_threshold = args.multilabel_prob_threshold
-        tumor_abs_thresh = args.tumor_abs_thresh
+        min_presence_threshold = args.min_presence_threshold
+        secondary_ratio_threshold = args.secondary_ratio_threshold
 
     if alpha_pc is None or alpha_pe is None:
         alpha_pe = args.alpha_pe
@@ -265,8 +284,9 @@ def run_epoch(model, dataloader, device, accelerator,
 
         # --- Cálculo de pérdidas ---
         loss = loss_BCE(wsi_prediction, y_onehot)
-        loss_pe_pc = loss_restrictions(wsi_proportions, alpha_pe, alpha_pc)
-        total_loss = loss + loss_pe_pc
+        # loss_pe_pc = loss_restrictions(wsi_proportions, alpha_pe, alpha_pc) #TODO Fix loss_restrictions
+        # total_loss = loss + loss_pe_pc 
+        total_loss = loss
 
         # --- Backpropagation ---
         if mode == "train":
@@ -284,7 +304,7 @@ def run_epoch(model, dataloader, device, accelerator,
         if mode =='val':
             all_wsi_proportions.append(wsi_proportions.detach().cpu())
                            
-        pred_primary, pred_secondary = select_gleason_grades_from_batch_proportions(wsi_proportions, tumor_abs_thresh)
+        pred_primary, pred_secondary = select_gleason_grades_from_batch_proportions(wsi_proportions, min_presence_threshold, secondary_ratio_threshold)
 
         # --- Probabilidades asociadas ---
         probs = wsi_prediction.detach().cpu()
@@ -326,21 +346,32 @@ def run_epoch(model, dataloader, device, accelerator,
     
      # Inicializar valores opcionales
     val_multilabel_prob_threshold = None
-    val_tumor_abs_threshold = None
+    val_min_presence_threshold = None
+    val_secondary_ratio_threshold = None
     heatmap_dataframe = None
 
     # Ajustes específicos de modo
     if mode == 'val':
-        val_metrics, val_multilabel_prob_threshold = select_multilabel_prob_threshold(y_onehot, probs)
-        metrics_global, val_tumor_abs_threshold = selecting_abs_threshold(all_wsi_proportions, y_true1, y_true2)
+        val_multilabel_prob_threshold = select_multilabel_prob_threshold(y_onehot, probs)
+        val_min_presence_threshold, val_secondary_ratio_threshold = select_primary_secondary_thresholds(all_wsi_proportions, y_true1, y_true2)
     if inference_heatmap:
         heatmap_dataframe = pd.DataFrame(heatmap_list)
     # --- Return centralizado ---
-    return metrics, epoch_loss, val_multilabel_prob_threshold, val_tumor_abs_threshold, heatmap_dataframe
+    return metrics, epoch_loss, val_multilabel_prob_threshold, val_min_presence_threshold, val_secondary_ratio_threshold, heatmap_dataframe
     
 def select_multilabel_prob_threshold(y_onehot, probs):
+    """
+    Optimiza el umbral de probabilidad para la predicción multilabel.
+    
+    Args:
+        y_onehot: tensor con las etiquetas verdaderas en formato one-hot
+        probs: tensor on las probabilidades predichas por el modelo
+        
+    Returns:
+        best_multilabel_prob_threshold: umbral de probabilidad óptimo para convertir 
+                                        probabilidades en predicciones binarias
+    """
     best_score= -1
-    best_multilabel_metrics ={}
     best_multilabel_prob_threshold = None
 
     thresh_list = [0.1, 0.15, 0.2, 0.25, 0.3, 0.35, 0.4, 0.45, 0.5, 0.55, 0.6, 0.65, 0.7]
@@ -352,51 +383,45 @@ def select_multilabel_prob_threshold(y_onehot, probs):
         score= metrics["f1_macro"] 
         if score> best_score :
             best_score = score
-            best_multilabel_metrics = metrics
             best_multilabel_prob_threshold = multilabel_prob_threshold
 
-    return best_multilabel_metrics, best_multilabel_prob_threshold 
+    return best_multilabel_prob_threshold 
 
-def selecting_prob_thresholds(y_true1, y_pred1, y_true2, y_pred2, y_onehot, probs):
-    # Primero obtenemos un forward completo
-
-    best_score1= -1
-    best_y_prob_threshold = None
-    best_metrics ={}
-    thresh_list = [0.1, 0.15, 0.2, 0.25, 0.3, 0.35, 0.4, 0.45, 0.5, 0.55, 0.6]
-
-    for y_prob_threshold in thresh_list:
-
-        metrics = compute_all_gleason_metrics(  y_true_primary=y_true1,
-                                                y_pred_primary=y_pred1,
-                                                y_true_secondary=y_true2,
-                                                y_pred_secondary=y_pred2,
-                                                y_true_onehot=y_onehot,
-                                                y_probs=probs,y_prob_threshold = y_prob_threshold)
-
-        score_f1 = metrics['multilabel']["f1_macro"] 
+def select_primary_secondary_thresholds(all_wsi_proportions, y_primary, y_secondary):
+    """
+    Optimiza los umbrales absoluto y relativo para la selección de grados Gleason.
+    
+    Args:
+        all_wsi_proportions: lista de tensores [Batch_size_i, 4] de proporciones
+        y_primary: tensor con grados primarios verdaderos
+        y_secondary: tensor con grados secundarios verdaderos
         
-        if score_f1 > best_score1 :
-            best_score1 = score_f1
-            best_y_prob_threshold = y_prob_threshold
-            best_metrics = metrics
+    Returns:
+        best_abs_threshold: umbral absoluto óptimo
+        best_relative_threshold: umbral relativo óptimo
+    """
+    
+    all_proportions = torch.cat(all_wsi_proportions) 
 
-    return best_metrics, best_y_prob_threshold 
+    best_val_f1 = -1
+    best_abs_threshold = None
+    best_relative_threshold = None
+   
+    abs_thresh_list = [0.1, 0.15, 0.2, 0.25, 0.3, 0.35, 0.4, 0.45, 0.5, 0.55, 0.6, 0.65, 0.7]
+    relative_thresh_list = [0.1, 0.2, 0.3, 0.4, 0.5]
 
-def selecting_abs_threshold(all_wsi_proportions, y_primary, y_secondary):
-    # Concatenar proporciones
-    all_proportions = torch.cat(all_wsi_proportions) # Necesitas agregar all_wsi_proportions a tus listas de acumulación.
+    for abs_thresh in abs_thresh_list:
+        for rel_thresh in relative_thresh_list:
+            pred_primary, pred_secondary = select_gleason_grades_from_batch_proportions(
+                all_proportions, min_presence_thresh=abs_thresh, secondary_ratio_thresh=rel_thresh
+            )
+            y_true_global = y_primary + y_secondary
+            y_pred_global = pred_primary + pred_secondary
+            metrics_global = compute_metrics(y_true_global, y_pred_global)
 
-    best_val_f1 = 0
-    thresh_list = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6] 
+            if metrics_global['accuracy'] >= best_val_f1:
+                best_val_f1 = metrics_global['accuracy']
+                best_abs_threshold = abs_thresh
+                best_relative_threshold = rel_thresh
 
-    for i in thresh_list:
-        pred_primary, pred_secondary = select_gleason_grades_from_batch_proportions(all_proportions, i)
-        y_true_global = y_primary + y_secondary
-        y_pred_global = pred_primary + pred_secondary
-        metrics_global = compute_metrics(y_true_global, y_pred_global)
-
-        if metrics_global['accuracy'] >= best_val_f1:
-            best_val_f1 = metrics_global['accuracy']
-            tumor_abs_threshold = i
-    return metrics_global, tumor_abs_threshold
+    return best_abs_threshold, best_relative_threshold

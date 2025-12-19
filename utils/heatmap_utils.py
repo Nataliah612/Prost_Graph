@@ -1,12 +1,44 @@
 from PIL import Image, ImageEnhance
 import numpy as np
 import os 
+import sys
 
-def build_heatmap(coords, scores, patch_size=512, scale_factor=16, save_path=None):
+current_dir  = os.path.abspath(os.getcwd())# Directorio actual
+sys.path.append(os.path.dirname(current_dir))
+from models.CNN import CNNEmbedder
+from models.keep_model import get_keep_ia3_model
+
+def get_model(path):
+    if 'graph' in path:
+        classification_mode = 'graph'
+    elif 'mlp':
+        classification_mode = 'mlp'
+    elif 'mean':
+        classification_mode = 'mean_aggre'
+    else: 
+        raise ValueError("No se encontró ningún tipo de agregacion válido en 'path'")
+
+    if 'pretrain' in path: 
+        pretrain=True
+    else: 
+        pretrain = False
+
+    # SELECCION DEL MODELO 
+    if 'CNN' in path:
+        model = CNNEmbedder(classification_mode)
+    elif 'KEEP' in path:
+        model = get_keep_ia3_model(classification_mode, pretrain)
+  
+        raise ValueError("No se encontró ningún tipo de modelo válido en ckpt_path")
+
+    return model
+
+def build_heatmap(coords, scores, weights, patch_size=512, scale_factor=16, save_path=None):
     """
     coords: Nx2 array (x, y)
     scores: N array con valores 0,1,2,3
-    Produce heatmap en RGB con colores fijos por clase.
+    weights: N array con intensidad (ej. 0–1 o cualquier rango)
+    Produce heatmap en RGB con colores por clase modulados por la intensidad.
     """
 
     # Escalar coordenadas
@@ -27,17 +59,34 @@ def build_heatmap(coords, scores, patch_size=512, scale_factor=16, save_path=Non
     # Heatmap RGB
     heatmap = np.zeros((height + patch_size, width + patch_size, 3), dtype=np.uint8)
 
-    # Mapa de colores
+    # Colores base
     color_map = {
-        3: (255,   0,   0),   # Rojo
-        2: (255, 128,   0),   # Naranja
-        1: (255, 255,   0),   # Amarillo
-        0: (  0,   0, 255)    # Azul
+        3: np.array([255,   0,   0]),  # Rojo
+        2: np.array([255, 128,   0]),  # Naranja
+        1: np.array([255, 255,   0]),  # Amarillo
+        0: np.array([  0,   0, 255])   # Azul
     }
 
-    # Dibujar los parches según su score en color sólido
-    for (x, y), s in zip(shifted_coords, scores):
-        color = color_map.get(int(s), (255, 255, 255))  # Blanco si algo raro
+    # Dibujar los parches modulando por el peso
+    for (x, y), s, w in zip(shifted_coords, scores, weights):
+
+        base_color = color_map.get(int(s), np.array([255, 255, 255]))
+        
+        # Normalizar peso si viene fuera de 0–1
+        #w_norm = (w - weights.min()) / (weights.max() - weights.min())
+        '''p_low, p_high = np.percentile(weights, [5, 99])
+        w_clip = np.clip(weights, p_low, p_high)
+
+        w_norm = (w_clip - p_low) / (p_high - p_low + 1e-8)
+        w_norm = np.sqrt(w_norm)'''
+        w_norm = float(w)
+
+        # Escalar color por intensidad
+        if weights==None:
+            color = color_map.get(int(s), (255, 255, 255))
+        else:
+            color = (base_color * w_norm*10 ).clip(0, 255).astype(np.uint8)
+
         heatmap[y:y+patch_size, x:x+patch_size] = color
 
     img = Image.fromarray(heatmap, mode="RGB")
@@ -57,7 +106,7 @@ def overlay_heatmap_on_image(orig, heatmap, alpha=0.45):
     
     return Image.blend(orig, heatmap_resized, alpha)
 
-def draw_gt_patches(orig_img,  file_name, mask_folder="/workspace/data/annotation_masks_SICAP", alpha=0.45):
+def draw_gt_patches(orig_img, file_name,mask_folder="/workspace/data/annotation_masks_SICAP", alpha=0.45):
     """
     Carga una máscara de grises, asigna un color por cada valor de gris y la superpone a la imagen original.
 
@@ -65,6 +114,7 @@ def draw_gt_patches(orig_img,  file_name, mask_folder="/workspace/data/annotatio
     ----------
     orig_img : PIL.Image
         Imagen original (ya reescalada).
+    
     file_name : str
         Nombre del archivo correspondiente (para buscar la máscara)
     mask_folder : str
@@ -79,8 +129,6 @@ def draw_gt_patches(orig_img,  file_name, mask_folder="/workspace/data/annotatio
     """
 
     # Ruta de la máscara en grises
-    print(mask_folder)
-    print(file_name)
     mask_path = os.path.join(mask_folder, file_name) #.replace(".jpg", ".png"))
 
     if not os.path.exists(mask_path):
@@ -96,7 +144,7 @@ def draw_gt_patches(orig_img,  file_name, mask_folder="/workspace/data/annotatio
     # --- DEFINIR COLORES POR VALOR DE GRIS ---
     # Ajusta aquí los colores para cada clase:
     color_map = {
-        50:  (255, 255, 0),      # Verde     → Grado 3
+        50:  (255, 255, 0),    # Verde       → Grado 3
         100: (255, 128, 0),    # Amarillo    → Grado 4
         150: (255, 128, 0),    # Naranja     → Grado 4 cribiforme
         200: (255, 0, 0),      # Rojo        → Grado 5

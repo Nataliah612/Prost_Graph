@@ -1,10 +1,15 @@
 import torch 
-import numpy as np
 import os 
 import csv 
-from PIL import Image, ImageDraw
-
-from sklearn.metrics import (accuracy_score,precision_score,recall_score,f1_score, cohen_kappa_score, roc_auc_score, average_precision_score)
+from sklearn.metrics import (
+    accuracy_score,
+    precision_score,
+    recall_score,
+    f1_score,
+    cohen_kappa_score,
+    roc_auc_score,
+    average_precision_score
+)
 
 def compute_metrics(y_true, y_pred):
     """
@@ -42,21 +47,23 @@ def compute_metrics(y_true, y_pred):
     # Kappa
     kappa = cohen_kappa_score(y_true, y_pred, weights='quadratic')
 
-    return {"accuracy": acc,
+    return {
+        "accuracy": acc,
 
-            "precision_micro": prec_micro,
-            "precision_macro": prec_macro,
-            "precision_weighted": prec_weighted,
+        "precision_micro": prec_micro,
+        "precision_macro": prec_macro,
+        "precision_weighted": prec_weighted,
 
-            "recall_micro": rec_micro,
-            "recall_macro": rec_macro,
-            "recall_weighted": rec_weighted,
+        "recall_micro": rec_micro,
+        "recall_macro": rec_macro,
+        "recall_weighted": rec_weighted,
 
-            "f1_micro": f1_micro,
-            "f1_macro": f1_macro,
-            "f1_weighted": f1_weighted,
+        "f1_micro": f1_micro,
+        "f1_macro": f1_macro,
+        "f1_weighted": f1_weighted,
 
-            "kappa": kappa}
+        "kappa": kappa,
+    }
 
 def compute_multilabel_metrics(y_true_onehot, y_prob, multilabel_prob_threshold=0.4):
     """
@@ -64,6 +71,7 @@ def compute_multilabel_metrics(y_true_onehot, y_prob, multilabel_prob_threshold=
 
     y_true_onehot: array (n_samples, n_labels) con 0/1
     y_prob: array (n_samples, n_labels) con probabilidades en [0,1]
+    multilabel_prob_threshold: umbral para convertir probabilidades en predicciones binarias
     """
 
     if isinstance(y_true_onehot, torch.Tensor):
@@ -80,32 +88,58 @@ def compute_multilabel_metrics(y_true_onehot, y_prob, multilabel_prob_threshold=
     metrics["subset_accuracy"] = accuracy_score(y_true_onehot, y_pred)
 
     # ----- MICRO -----
-    metrics["precision_micro"] = precision_score(y_true_onehot, y_pred, average="micro", zero_division=0)
-    metrics["recall_micro"] = recall_score(y_true_onehot, y_pred, average="micro", zero_division=0)
-    metrics["f1_micro"] = f1_score(y_true_onehot, y_pred, average="micro", zero_division=0)
+    metrics["precision_micro"] = precision_score(
+        y_true_onehot, y_pred, average="micro", zero_division=0
+    )
+    metrics["recall_micro"] = recall_score(
+        y_true_onehot, y_pred, average="micro", zero_division=0
+    )
+    metrics["f1_micro"] = f1_score(
+        y_true_onehot, y_pred, average="micro", zero_division=0
+    )
 
     # ----- MACRO -----
-    metrics["precision_macro"] = precision_score(y_true_onehot, y_pred, average="macro", zero_division=0)
-    metrics["recall_macro"] = recall_score(y_true_onehot, y_pred, average="macro", zero_division=0)
-    metrics["f1_macro"] = f1_score(y_true_onehot, y_pred, average="macro", zero_division=0)
+    metrics["precision_macro"] = precision_score(
+        y_true_onehot, y_pred, average="macro", zero_division=0
+    )
+    metrics["recall_macro"] = recall_score(
+        y_true_onehot, y_pred, average="macro", zero_division=0
+    )
+    metrics["f1_macro"] = f1_score(
+        y_true_onehot, y_pred, average="macro", zero_division=0
+    )
 
     # ----- WEIGHTED -----
-    metrics["precision_weighted"] = precision_score(y_true_onehot, y_pred, average="weighted", zero_division=0)
-    metrics["recall_weighted"] = recall_score(y_true_onehot, y_pred, average="weighted", zero_division=0)
-    metrics["f1_weighted"] = f1_score(y_true_onehot, y_pred, average="weighted", zero_division=0)
+    metrics["precision_weighted"] = precision_score(
+        y_true_onehot, y_pred, average="weighted", zero_division=0
+    )
+    metrics["recall_weighted"] = recall_score(
+        y_true_onehot, y_pred, average="weighted", zero_division=0
+    )
+    metrics["f1_weighted"] = f1_score(
+        y_true_onehot, y_pred, average="weighted", zero_division=0
+    )
 
     # ----- AUROC -----
     try:
-        metrics["auroc_macro"] = roc_auc_score(y_true_onehot, y_prob, average="macro")
-        metrics["auroc_weighted"] = roc_auc_score(y_true_onehot, y_prob, average="weighted")
+        metrics["auroc_macro"] = roc_auc_score(
+            y_true_onehot, y_prob, average="macro"
+        )
+        metrics["auroc_weighted"] = roc_auc_score(
+            y_true_onehot, y_prob, average="weighted"
+        )
     except ValueError:
         metrics["auroc_macro"] = float("nan")
         metrics["auroc_weighted"] = float("nan")
 
     # ----- AUPRC -----
     try:
-        metrics["auprc_macro"] = average_precision_score(y_true_onehot, y_prob, average="macro")
-        metrics["auprc_weighted"] = average_precision_score( y_true_onehot, y_prob, average="weighted")
+        metrics["auprc_macro"] = average_precision_score(
+            y_true_onehot, y_prob, average="macro"
+        )
+        metrics["auprc_weighted"] = average_precision_score(
+            y_true_onehot, y_prob, average="weighted"
+        )
     except ValueError:
         metrics["auprc_macro"] = float("nan")
         metrics["auprc_weighted"] = float("nan")
@@ -113,7 +147,8 @@ def compute_multilabel_metrics(y_true_onehot, y_prob, multilabel_prob_threshold=
     return metrics
 
 def compute_all_gleason_metrics(y_true_primary, y_pred_primary,
-                                y_true_secondary, y_pred_secondary, y_true_onehot=None,y_probs=None, multilabel_prob_threshold=0.4):
+                                y_true_secondary, y_pred_secondary,
+                                y_true_onehot=None,y_probs=None, multilabel_prob_threshold=0.4):
     """
     Calcula las métricas para Gleason primario, secundario y global.
     
@@ -124,6 +159,7 @@ def compute_all_gleason_metrics(y_true_primary, y_pred_primary,
         y_pred_secondary (array/tensor): predicciones del Gleason secundario
         y_true_onehot: array (n_samples, n_labels) con 0/1
         y_prob: array (n_samples, n_labels) con probabilidades en [0,1]
+        multilabel_prob_threshold (float): umbral para convertir probabilidades en predicciones binarias
 
     Returns:
         dict: métricas globales, incluyendo primary, secondary, global y multilabel.
@@ -140,9 +176,11 @@ def compute_all_gleason_metrics(y_true_primary, y_pred_primary,
     metrics_global = compute_metrics(y_true_global, y_pred_global)
 
     # --- Empaquetar resultados en un solo diccionario ---
-    metrics = { "primary": metrics_primary,
-                "secondary": metrics_secondary,
-                "global": metrics_global    }
+    metrics = {
+        "primary": metrics_primary,
+        "secondary": metrics_secondary,
+        "global": metrics_global,
+    }
 
      # --- Multilabel ---
     if y_true_onehot is not None and y_probs is not None:
@@ -350,100 +388,3 @@ def save_metrics_to_csv(metrics: dict, epoch: int, filepath: str = "metrics.csv"
             writer.writeheader()
 
         writer.writerow(row)
-
-def build_heatmap(coords, scores, patch_size=512, scale_factor=16, save_path=None):
-    """
-    coords: Nx2 array (x, y)
-    scores: N array con valores 0,1,2,3
-    Produce heatmap en RGB con colores fijos por clase.
-    """
-
-    # Escalar coordenadas
-    coords = coords // scale_factor
-    patch_size = patch_size // scale_factor
-
-    max_x, max_y = coords[:, 0].max(), coords[:, 1].max()
-    min_x, min_y = coords[:, 0].min(), coords[:, 1].min()
-
-    width  = max_x - min_x + 1
-    height = max_y - min_y + 1
-
-    # Ajustar coordenadas
-    shifted_coords = coords.copy()
-    shifted_coords[:, 0] -= min_x
-    shifted_coords[:, 1] -= min_y
-
-    # Heatmap RGB
-    heatmap = np.zeros((height + patch_size, width + patch_size, 3), dtype=np.uint8)
-
-    # Mapa de colores
-    color_map = {   3: (255,   0,   0),   # Rojo
-                    2: (255, 128,   0),   # Naranja
-                    1: (255, 255,   0),   # Amarillo
-                    0: (  0,   0, 255)    # Azul
-                }
-
-    # Dibujar los parches según su score en color sólido
-    for (x, y), s in zip(shifted_coords, scores):
-        color = color_map.get(int(s), (255, 255, 255))  # Blanco si algo raro
-        heatmap[y:y+patch_size, x:x+patch_size] = color
-
-    img = Image.fromarray(heatmap, mode="RGB")
-
-    if save_path:
-        img.save(save_path)
-
-    return img
-
-
-def overlay_heatmap_on_image(orig, heatmap, alpha=0.45):
-    """Devuelve el overlay del heatmap sobre la imagen original."""
-    if heatmap.mode != "RGB":
-        heatmap = heatmap.convert("RGB")
-    
-    heatmap_resized = heatmap.resize(orig.size)
-    # Asegurar que el heatmap sea RGB
-    
-    return Image.blend(orig, heatmap_resized, alpha)
-
-def draw_gt_patches(orig, df_gt, slide_id, patch_size=512, scale_factor=16):
-    """
-    Colorea los parches GT sobre la imagen original con transparencia.
-    """
-    alpha = 80
-    # Colores clase → RGB
-    COLOR_MAP = {   5: (255, 0, 0, alpha),      # Rojo
-                    4: (255, 140, 0, alpha),    # Naranja
-                    4.5: (255, 140, 0, alpha),    # Naranja
-                    3: (255, 255, 0, alpha),    # Amarillo
-                    0: (0, 0, 255, alpha),      # Azul
-                }
-    slide_id = slide_id.split('.')[0]
-    df_slide = df_gt[df_gt["Slide_ID"] == slide_id]
-
-    # Convertir imagen a RGBA para permitir alpha
-    orig = orig.convert("RGBA")
-
-    # Capa transparente donde dibujar los colores
-    overlay = Image.new("RGBA", orig.size, (0, 0, 0, 0))
-    draw = ImageDraw.Draw(overlay)
-
-    ps = patch_size // scale_factor
-
-    for _, row_gt in df_slide.iterrows():
-        x = int(row_gt["X"] // scale_factor)
-        y = int(row_gt["Y"] // scale_factor)
-        val = int(row_gt["Valor_Mask"])
-
-        if val not in COLOR_MAP:
-            continue
-        
-        color = COLOR_MAP[val]  # rgba con alpha
-
-        # Dibujar parche transparente
-        draw.rectangle([x, y, x + ps, y + ps], fill=color)
-
-    # Combinar overlay de parches con la imagen original
-    blended = Image.alpha_composite(orig, overlay)
-
-    return blended.convert("RGB")

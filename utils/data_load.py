@@ -1,25 +1,21 @@
-
-import numpy as np 
+import torch
+from torchvision import transforms as T
+from torch.utils.data import Dataset
 import pandas as pd
 import os
-
-import torch
-from torch.utils.data import Dataset
-from torchvision import transforms as T
-
+import numpy as np
 import h5py
+from tqdm import tqdm 
 import gc
-import sys
 from PIL import Image
-from tqdm import tqdm
+import sys
 
-def create_file_label_df(images_path, data_path, NAME='',small_dataset=False ,slide_col='image_id'):
-    patch_list,patient_list  = [], []
-    gleason_score = []
-    gleason_primary_list, gleason_secondary_list  = [], []
+def create_file_label_df(images_path, data_path, NAME='', slide_col='image_id', small_dataset_for_test = False):
+    features_list,patient_list  = [], []
+    gleason_score, gleason_primary_list, gleason_secondary_list= [], [],[]
+
     df = pd.read_excel(data_path)
-    
-    df = df.head(100) if small_dataset == True else df
+    df = df.head(500) if small_dataset_for_test else df
 
     wsis = [f for f in os.listdir(images_path) if f.endswith('.h5')]
     for f in tqdm(wsis, desc="Procesando WSIs", file=sys.stdout):
@@ -31,6 +27,7 @@ def create_file_label_df(images_path, data_path, NAME='',small_dataset=False ,sl
         if not row.empty:
             ruta_h5 = os.path.join(images_path, f)
          
+            features = ruta_h5
             gleason = row[['gleason_score']].values
             if 'patient_id' in df.columns:
                 patient_select=row['patient_id'].values
@@ -38,13 +35,13 @@ def create_file_label_df(images_path, data_path, NAME='',small_dataset=False ,sl
                 patient_select = row['image_id'].values
 
             gleason_score.append(gleason.item())
-            patch_list.append(ruta_h5)
+            features_list.append(features)
             patient_list.append(patient_select)
             gleason_primary_list.append(row['gleason_primary'].values[0])
             gleason_secondary_list.append(row['gleason_secondary'].values[0])
 
     df_train = pd.DataFrame({
-        'patch': patch_list,
+        'features': features_list,
         'patients':patient_list,
         'gleason_score': gleason_score,
         'gleason_primary': gleason_primary_list,
@@ -52,7 +49,7 @@ def create_file_label_df(images_path, data_path, NAME='',small_dataset=False ,sl
     })
 
     return df_train
-    
+      
 class WSI_Dataset(Dataset):
     """
     Dataset de WSI con opción de precarga completa en CPU o lectura on-demand.
@@ -61,12 +58,11 @@ class WSI_Dataset(Dataset):
         dataframe (pd.DataFrame)
         indices (list[int]): Lista de índices del DataFrame.
         random_subsets (bool): Si True, en cada época se usa un subset aleatorio de tamaño len_subset.
-                               Si False, se usa todo el dataset (validación/test).
         len_subset (int): Tamaño del subset aleatorio que se usará en cada época.
-                          Si es mayor que el total, se ajusta automáticamente.
         load_on_demand (bool): 
-            - False => Precarga todas las imagenes en CPU.
-            - True  => no precargar imágenes; lectura en __getitem__.
+            - False => Precarga todas las imágenes en CPU.
+            - True  => lectura en __getitem__.
+        inference_heatmap (bool): Si True, devuelve también las coordenadas de los parches.
     """
     def __init__(self, dataframe, indices, random_subsets=False, len_subset=1000, load_on_demand=False, inference_heatmap=False):
         gc.collect()
@@ -76,21 +72,21 @@ class WSI_Dataset(Dataset):
         self.load_on_demand = bool(load_on_demand)
         self.inference_heatmap = bool(inference_heatmap)
 
-        # Ajustar tamaño del subset
-        if self.random_subsets:
-            self.len_subset = min(int(len_subset), len(self.indices))
-        else:
-            self.len_subset = len(self.indices)
+        # Ajuste del tamaño del subset
+        self.len_subset = min(len_subset, len(self.indices)) if random_subsets else len(self.indices)
 
         # Transformaciones estándar
-        self.transform = T.Compose([    T.Resize(size=224, interpolation=T.InterpolationMode.BICUBIC),
-                                        T.CenterCrop(size=(224, 224)),
-                                        T.ToTensor(),
-                                        T.Normalize(mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225))  ])
+        self.transform = T.Compose([
+            T.ToTensor(),
+            T.Resize((224, 224),antialias=True),
+            T.Normalize(mean=[0.485, 0.456, 0.406], # ImageNet Normalization Values
+                       std=[0.229, 0.224, 0.225])
+        ])
 
-        # Etiquetas (se precargan siempre por su bajo coste en memoria)
-        self.patch_id, self.images, self.labels, self.coords = [],[],[],[]
-        
+        # Inicializar listas de datos
+        self.images, self.labels, self.patch_id,  self.coords = [], [], [], []
+
+        # Precargar etiquetas (siempre en memoria)
         for i in self.indices:
             row = self.dataframe.iloc[i]
             label = torch.tensor(
@@ -99,29 +95,30 @@ class WSI_Dataset(Dataset):
             )
             self.labels.append(label)
 
-        # Si NO estamos en modo load_on_demand, precargar imágenes
+        # Precarga de imágenes si load_on_demand=False
         if not self.load_on_demand:
-            
             for i in tqdm(self.indices, desc="Loading WSI", file=sys.stdout):
                 row = self.dataframe.iloc[i]
-                features_path = row['patch']
+                features_path = row['features']
                 with h5py.File(features_path, "r", swmr=True) as h5_file:
-                    imgs = h5_file["imgs"][:]  # numpy array
-                    if inference_heatmap:
-                        coords = h5_file["coords"][:]  # numpy array
+                    imgs = h5_file["imgs"][:]
+                    coords = h5_file["coords"][:] if inference_heatmap else None
 
                 imgs_tensor = torch.stack([self.transform(Image.fromarray(img)) for img in imgs])
-                self.patch_id.append(row['patch'])
                 self.images.append(imgs_tensor)
-                self.coords.append(coords if inference_heatmap else None)
+                self.patch_id.append(features_path)
+                self.coords.append(coords)
         else:
-            # En modo load_on_demand sólo guardamos rutas
-            self.feature_paths = [self.dataframe.iloc[i]['patch'] for i in self.indices]
+            # En modo on-demand solo guardamos rutas
+            self.feature_paths = [self.dataframe.iloc[i]['features'] for i in self.indices]
+            # coords se cargarán desde HDF5 solo si inference_heatmap=True
+            self.coords = [None] * len(self.indices)
+            self.patch_id = self.feature_paths
 
         # Mapeo índice original → posición en listas
         self.idx2pos = {orig_idx: pos for pos, orig_idx in enumerate(self.indices)}
 
-        # Inicializar subset
+        # Inicializar subset aleatorio si aplica
         if self.random_subsets:
             self.ind_subset = None
             self.update_random_subset()
@@ -129,46 +126,44 @@ class WSI_Dataset(Dataset):
             self.ind_subset = self.indices
 
     def update_random_subset(self):
+        """Selecciona un subset aleatorio de WSI para la época actual."""
         if self.random_subsets:
             self.ind_subset = np.random.choice(self.indices, self.len_subset, replace=False)
 
     def get_current_subset_indices(self):
+        """Devuelve los índices del subset actual."""
         return list(self.ind_subset)
 
     def __len__(self):
         return len(self.ind_subset)
 
     def __getitem__(self, idx):
-        """
-        Si load_on_demand=True => lectura on-demand desde el .h5.
-        Si load_on_demand=False => devuelve las imagenes en tensores precargados.
-        """
+        """Devuelve (features_tensor, label_tensor) o (features_tensor, label_tensor, patch_id, coords) según los modos."""
         if self.random_subsets:
             orig_idx = int(self.ind_subset[idx])
             pos = self.idx2pos[orig_idx]
         else:
             pos = idx
 
-        patch_id = self.patch_id[pos] 
         label = self.labels[pos]
-        coords = self.coords[pos] 
 
-        # MODO PRECARGA CPU
+        # Precarga CPU
         if not self.load_on_demand:
-            if self.inference_heatmap:
-                return self.images[pos], label, patch_id,coords
-            else:
-                return self.images[pos], label
-
-        # MODO GPU-LIKE: carga desde HDF5 en cada __getitem__
-        feature_path = self.feature_paths[pos]
-        with h5py.File(feature_path, "r") as h5_file:
-            imgs = h5_file["imgs"][:]  # numpy array
-
-        imgs_tensor = torch.stack([self.transform(Image.fromarray(img)) for img in imgs ])
+            imgs_tensor = self.images[pos]
+            patch_id = self.patch_id[pos]
+            coords = self.coords[pos] if self.inference_heatmap else None
+        else:
+            feature_path = self.feature_paths[pos]
+            patch_id = feature_path
+            coords = None
+            with h5py.File(feature_path, "r") as h5_file:
+                imgs = h5_file["imgs"][:]
+                if self.inference_heatmap:
+                    coords = h5_file.get("coords", None)
+            imgs_tensor = torch.stack([self.transform(Image.fromarray(img)) for img in imgs])
 
         if self.inference_heatmap:
-            return imgs_tensor, label,patch_id, coords
+            return imgs_tensor, label, patch_id,  coords
         else:
             return imgs_tensor, label
 
@@ -189,11 +184,7 @@ def collate_fn(batch):
         features, labels = zip(*batch)
         return list(features), torch.stack(labels, dim=0), None, None
     elif len(batch[0]) == 4:
-        features,labels, patch_ids, coords = zip(*batch)
+        features, labels,patch_ids, coords = zip(*batch)
         return list(features), torch.stack(labels, dim=0), list(patch_ids), list(coords)
     else:
         raise ValueError(f"Batch con estructura inesperada")
-    
-def extractor(dataloader):
-    for features, labels in dataloader:
-        return features, labels 
