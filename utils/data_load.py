@@ -102,6 +102,8 @@ class WSI_Dataset(Dataset):
                 features_path = row['features']
                 with h5py.File(features_path, "r", swmr=True) as h5_file:
                     imgs = h5_file["imgs"][:]
+                    if imgs.shape[0]==1:
+                        continue
                     coords = h5_file["coords"][:] if inference_heatmap else None
 
                 imgs_tensor = torch.stack([self.transform(Image.fromarray(img)) for img in imgs])

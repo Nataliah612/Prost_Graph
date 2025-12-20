@@ -72,7 +72,6 @@ def main():
     # Multi-GPU accelerator init
     accelerator = Accelerator()
     device = accelerator.device
-
     print(f"Usando dispositivo: {device}", flush = True)
     torch.cuda.empty_cache()
 
