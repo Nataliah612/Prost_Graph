@@ -179,6 +179,16 @@ class KEEPForGleason(nn.Module):
 
     def forward(self, images):
         # Codificación del encoder visual
-        features_list = [torch.stack([self.base.encode_image(patch.unsqueeze(dim=0)) for patch in img.squeeze(0)])  for img in images]
+        features_list = [
+            torch.stack([
+                self.base.encode_image(
+                    patch.unsqueeze(0).unsqueeze(0) if patch.dim() == 2
+                    else patch.unsqueeze(0) if patch.dim() == 3 and patch.shape[0] in (1, 3)
+                    else patch.permute(2, 0, 1).unsqueeze(0)
+                )
+                for patch in img.squeeze(0)
+            ])
+            for img in images
+        ]
         logits = self.classifier(features_list)
         return logits

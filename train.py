@@ -34,7 +34,7 @@ def parse_args():
 
     parser.add_argument("--results_path",type=str, default="/workspace/results", help=" Ruta de resultados") 
 
-    parser.add_argument("--extractor_model", type=str, default="CNN", help="Tipo de modelo encoder para parches ('CNN', 'KEEP')")
+    parser.add_argument("--extractor_model", type=str, default="KEEP", help="Tipo de modelo encoder para parches ('CNN', 'KEEP')")
     parser.add_argument("--pretrain",action="store_true",help="Descongelar el backbone del encoder para parches")
     parser.add_argument("--classification_mode", type=str, default="graph", help="Modo de funcionamiento del MIL ('graph','mlp','mean_aggre')")
 
@@ -77,7 +77,7 @@ def main():
     torch.cuda.empty_cache()
 
     set_multiple_seed(args.seed)
-
+    
     print("Creating PANDA Train Dataset ...", flush = True)
     df_train  = create_file_label_df(args.panda_img_folder, args.panda_df_path, small_dataset_for_test= args.small_dataset_for_test)
     df_train = df_train.sort_values(by=['patients']).reset_index(drop=True)
