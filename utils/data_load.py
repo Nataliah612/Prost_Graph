@@ -93,7 +93,7 @@ class WSI_Dataset(Dataset):
                 [row['gleason_primary_mapped'], row['gleason_secondary_mapped']],
                 dtype=torch.long
             )
-            self.labels.append(label)
+            
 
         # Precarga de imágenes si load_on_demand=False
         if not self.load_on_demand:
@@ -105,7 +105,7 @@ class WSI_Dataset(Dataset):
                     if imgs.shape[0]==1:
                         continue
                     coords = h5_file["coords"][:] if inference_heatmap else None
-
+                self.labels.append(label)
                 imgs_tensor = torch.stack([self.transform(Image.fromarray(img)) for img in imgs])
                 self.images.append(imgs_tensor)
                 self.patch_id.append(features_path)
