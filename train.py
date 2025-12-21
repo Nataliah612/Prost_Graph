@@ -326,11 +326,12 @@ if __name__ == "__main__":
         print("Running multiple experiments ...", flush = True)
         experiments = [
             dict(extractor_model='CNN', optimizer='AdamW',classification_mode='graph'),
-            #dict(extractor_model='KEEP', optimizer='AdamW',classification_mode='mlp'),
-            #dict(extractor_model='KEEP', optimizer='AdamW',classification_mode='mean_aggre'),
-            #dict(extractor_model='KEEP', optimizer='AdamW',classification_mode='graph', pretrain = True),
-            #dict(extractor_model='KEEP', optimizer='AdamW',classification_mode='mlp', pretrain = True),
-            #dict(extractor_model='KEEP', optimizer='AdamW',classification_mode='mean_aggre', pretrain = True),
+            dict(extractor_model='KEEP', optimizer='AdamW',classification_mode='graph'),
+            dict(extractor_model='KEEP', optimizer='AdamW',classification_mode='mlp'),
+            dict(extractor_model='KEEP', optimizer='AdamW',classification_mode='mean_aggre'),
+            dict(extractor_model='KEEP', optimizer='AdamW',classification_mode='graph', pretrain = True),
+            dict(extractor_model='KEEP', optimizer='AdamW',classification_mode='mlp', pretrain = True),
+            dict(extractor_model='KEEP', optimizer='AdamW',classification_mode='mean_aggre', pretrain = True),
         ]
         for exp in experiments:
             exp_args = copy.deepcopy(args)
