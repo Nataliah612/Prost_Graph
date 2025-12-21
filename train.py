@@ -56,9 +56,9 @@ def parse_args():
 
     parser.add_argument("--alpha_pe", type=float, default=0, help="Peso de la restricción Positive Expansion")
     parser.add_argument("--alpha_pc", type=float, default=0, help="Peso de la restricción Proportion Constraint")
-    parser.add_argument("--multilabel_prob_threshold", type=float, default=0.4,  help="Umbral de probabilidad para clasificación multilabel.")
+    parser.add_argument("--multilabel_prob_threshold", type=float, default=0.2,  help="Umbral de probabilidad para clasificación multilabel.")
     parser.add_argument("--min_presence_threshold", type=float, default=0.1,  help="Umbral mínimo de presencia tumoral para considerar WSI como cáncer.")
-    parser.add_argument("--secondary_ratio_threshold", type=float, default=0.3,  help="Umbral mínimo de proporción relativa del secundario respecto al primario.") 
+    parser.add_argument("--secondary_ratio_threshold", type=float, default=0.5,  help="Umbral mínimo de proporción relativa del secundario respecto al primario.") 
 
     parser.add_argument("--resume_training", action="store_true", help="Reanudar entrenamiento desde un modelo preentrenado")
     parser.add_argument("--pretrained_model_path", type=str, default=None, help="Ruta del directorio con el modelo preentrenado (+ Optimizer, Scheduler)")
@@ -325,12 +325,12 @@ if __name__ == "__main__":
     else:
         print("Running multiple experiments ...", flush = True)
         experiments = [
-            dict(extractor_model='KEEP', optimizer='AdamW',classification_mode='graph'),
-            dict(extractor_model='KEEP', optimizer='AdamW',classification_mode='mlp'),
-            dict(extractor_model='KEEP', optimizer='AdamW',classification_mode='mean_aggre'),
-            dict(extractor_model='KEEP', optimizer='AdamW',classification_mode='graph', pretrain = True),
-            dict(extractor_model='KEEP', optimizer='AdamW',classification_mode='mlp', pretrain = True),
-            dict(extractor_model='KEEP', optimizer='AdamW',classification_mode='mean_aggre', pretrain = True),
+            dict(extractor_model='CNN', optimizer='AdamW',classification_mode='graph'),
+            #dict(extractor_model='KEEP', optimizer='AdamW',classification_mode='mlp'),
+            #dict(extractor_model='KEEP', optimizer='AdamW',classification_mode='mean_aggre'),
+            #dict(extractor_model='KEEP', optimizer='AdamW',classification_mode='graph', pretrain = True),
+            #dict(extractor_model='KEEP', optimizer='AdamW',classification_mode='mlp', pretrain = True),
+            #dict(extractor_model='KEEP', optimizer='AdamW',classification_mode='mean_aggre', pretrain = True),
         ]
         for exp in experiments:
             exp_args = copy.deepcopy(args)
