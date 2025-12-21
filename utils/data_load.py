@@ -84,7 +84,7 @@ class WSI_Dataset(Dataset):
         ])
 
         # Inicializar listas de datos
-        self.images, self.labels, self.patch_id,  self.coords = [], [], [], []
+        self.images, self.labels, self.patch_id,  self.coords, self.index = [], [], [], [], []
 
         # Precargar etiquetas (siempre en memoria)
         for i in self.indices:
@@ -110,6 +110,7 @@ class WSI_Dataset(Dataset):
                 self.images.append(imgs_tensor)
                 self.patch_id.append(features_path)
                 self.coords.append(coords)
+                self.index.append(i)
         else:
             # En modo on-demand solo guardamos rutas
             self.feature_paths = [self.dataframe.iloc[i]['features'] for i in self.indices]
@@ -118,19 +119,19 @@ class WSI_Dataset(Dataset):
             self.patch_id = self.feature_paths
 
         # Mapeo índice original → posición en listas
-        self.idx2pos = {orig_idx: pos for pos, orig_idx in enumerate(self.indices)}
+        self.idx2pos = {orig_idx: pos for pos, orig_idx in enumerate(self.index)}
 
         # Inicializar subset aleatorio si aplica
         if self.random_subsets:
             self.ind_subset = None
             self.update_random_subset()
         else:
-            self.ind_subset = self.indices
+            self.ind_subset = self.index
 
     def update_random_subset(self):
         """Selecciona un subset aleatorio de WSI para la época actual."""
         if self.random_subsets:
-            self.ind_subset = np.random.choice(self.indices, self.len_subset, replace=False)
+            self.ind_subset = np.random.choice(self.index, self.len_subset, replace=False)
 
     def get_current_subset_indices(self):
         """Devuelve los índices del subset actual."""
