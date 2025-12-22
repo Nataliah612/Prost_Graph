@@ -86,20 +86,15 @@ class WSI_Dataset(Dataset):
         # Inicializar listas de datos
         self.images, self.labels, self.patch_id,  self.coords, self.index = [], [], [], [], []
 
-        # Precargar etiquetas (siempre en memoria)
-        for i in self.indices:
-            row = self.dataframe.iloc[i]
-            label = torch.tensor(
-                [row['gleason_primary_mapped'], row['gleason_secondary_mapped']],
-                dtype=torch.long
-            )
-            
-
         # Precarga de imágenes si load_on_demand=False
         if not self.load_on_demand:
             for i in tqdm(self.indices, desc="Loading WSI", file=sys.stdout):
                 row = self.dataframe.iloc[i]
                 features_path = row['features']
+                label = torch.tensor(
+                        [row['gleason_primary_mapped'], row['gleason_secondary_mapped']],
+                        dtype=torch.long
+                )
                 with h5py.File(features_path, "r", swmr=True) as h5_file:
                     imgs = h5_file["imgs"][:]
                     if imgs.shape[0]==1:
@@ -113,6 +108,12 @@ class WSI_Dataset(Dataset):
                 self.index.append(i)
         else:
             # En modo on-demand solo guardamos rutas
+            for i in self.indices:
+                row = self.dataframe.iloc[i]
+                label = torch.tensor( # Precargar etiquetas (siempre en memoria)
+                    [row['gleason_primary_mapped'], row['gleason_secondary_mapped']],
+                    dtype=torch.long
+                )
             self.feature_paths = [self.dataframe.iloc[i]['features'] for i in self.indices]
             # coords se cargarán desde HDF5 solo si inference_heatmap=True
             self.coords = [None] * len(self.indices)
