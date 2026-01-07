@@ -190,5 +190,5 @@ class KEEPForGleason(nn.Module):
             ])
             for img in images
         ]
-        logits = self.classifier(features_list)
-        return logits
+        wsi_prediction, patchs_prediction, weights_tensor_list = self.classifier(features_list)
+        return wsi_prediction, patchs_prediction, weights_tensor_list

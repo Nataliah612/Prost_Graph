@@ -98,7 +98,7 @@ class attentionMIL_instance(nn.Module):
         attn = torch.softmax(weights, dim=0)      # (N,)
         weighted = logits_ws * attn.unsqueeze(1)  # (N, num_classes)
         w_logits = weighted.sum(dim=0)            # (num_classes,)
-        return w_logits
+        return w_logits, attn
 
 class MILArchitecture(nn.Module):
     def __init__(self, classes, aggregation='attentionMIL', L_value=None):
@@ -123,7 +123,7 @@ class MILArchitecture(nn.Module):
         probs_splits = torch.split(patch_probs, lengths, dim=0)
         feats_splits = torch.split(patch_feats, lengths, dim=0)
 
-        wsis = []
+        wsis, weights = [],[]
         if self.aggregation == 'max':
             for p in probs_splits:
                 if p.size(0) == 0:
@@ -139,12 +139,14 @@ class MILArchitecture(nn.Module):
 
         elif self.aggregation == 'attentionMIL':
             for p, f in zip(probs_splits, feats_splits):
-                wsi = self.attentionModule(p, f)
+                wsi, weight = self.attentionModule(p, f)
                 wsis.append(wsi)
+                weights.append(weight)
               
         else:
             raise ValueError(f"Unknown aggregation: {self.aggregation}")
         
-        wsi_logits = torch.stack(wsis, dim=0)  #    
-    
-        return wsi_logits
+        wsi_logits = torch.stack(wsis, dim=0)  #  
+        weights_logits = torch.stack(weights, dim=0)   
+
+        return wsi_logits, weights_logits

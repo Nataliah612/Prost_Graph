@@ -85,8 +85,8 @@ class CNNEmbedder(nn.Module):
 
         features_list = list(torch.split(total_feats, lengths, dim=0))
 
-        wsi_logits, patchs_probs_list = self.classifier(features_list)
+        wsi_logits, patchs_probs_list, weihts_patch= self.classifier(features_list)
 
-        return wsi_logits, patchs_probs_list
+        return wsi_logits, patchs_probs_list, weihts_patch
     
         
