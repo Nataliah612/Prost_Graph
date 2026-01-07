@@ -40,7 +40,7 @@ class model_mean_aggre(nn.Module):
         all_patches = torch.cat([t for t in inputs_list if t.size(0) > 0], dim=0)  # (N_total, C, H, W)
         chunks = torch.split(all_patches, self.chunk_size, dim=0)
         
-        all_features, all_probs = [],[]
+        all_features, all_probs, all_weight = [],[],[]
         # 4. Procesar chunk a chunk en GPU
         for chunk in chunks:
             # Mover SOLO este trocito a GPU
@@ -66,4 +66,4 @@ class model_mean_aggre(nn.Module):
         total_probs = torch.cat(all_probs, dim=0) 
         patchs_probs_list = list(torch.split(total_probs, lengths, dim=0))
 
-        return wsi_probs, patchs_probs_list
+        return wsi_probs, patchs_probs_list, all_weight

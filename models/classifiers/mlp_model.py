@@ -57,11 +57,11 @@ class model_mlp(nn.Module):
         total_feats = torch.cat(all_features, dim=0) # (N_total, embed_dim)
         total_probs = torch.cat(all_probs, dim=0) 
 
-        wsi_logits = self.mil(total_probs, total_feats, lengths)
+        wsi_logits,weights_logits = self.mil(total_probs, total_feats, lengths)
 
         patchs_probs_list = list(torch.split(total_probs, lengths, dim=0))
 
-        return wsi_logits, patchs_probs_list
+        return wsi_logits, patchs_probs_list, weights_logits
     
 
 class Attention(nn.Module):
