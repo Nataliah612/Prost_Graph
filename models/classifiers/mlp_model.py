@@ -147,6 +147,6 @@ class MILArchitecture(nn.Module):
             raise ValueError(f"Unknown aggregation: {self.aggregation}")
         
         wsi_logits = torch.stack(wsis, dim=0)  #  
-        weights_logits = torch.stack(weights, dim=0)   
+           
 
-        return wsi_logits, weights_logits
+        return wsi_logits, weights
