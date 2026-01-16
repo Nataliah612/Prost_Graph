@@ -56,7 +56,7 @@ class gat(torch.nn.Module):
         batch = batch.to(device)
 
         x, edge_index, batch_idx = batch.x, batch.edge_index, batch.batch
-        lengths = batch.ptr[1:] - batch.ptr[:-1]   # Guaardar el numero de parches por WSI 
+        lengths = batch.ptr[1:] - batch.ptr[:-1]   # Guardar el numero de parches por WSI 
 
         # GATConv 
         z1 = self.gat1(x, edge_index)

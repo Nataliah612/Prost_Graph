@@ -43,13 +43,13 @@ def parse_args():
     parser.add_argument("--random_subset",action="store_true",help="Uso de subset variable por época de tamaño reducido para agilizar entrenamiento.")
 
     parser.add_argument("--hiperparam_tuning", action="store_true", help="Activar hiperparametrización (Se probarán combinaciones definidas en el código)")
-    parser.add_argument("--batch_size", type=int, default=32, help="Tamaño de batch")
+    parser.add_argument("--batch_size", type=int, default=64, help="Tamaño de batch")
     parser.add_argument("--optimizer", type=str, default="AdamW", help="Optimizador (SGD, AdamW)")
     parser.add_argument("--momentum", type=float, default=0.9, help="Momentum. Solo para SGD")
     parser.add_argument("--learning_rate", type=float, default=1e-4, help="Learning rate")
     parser.add_argument("--weight_decay", type=float, default=1e-5, help="Weight decay")
     parser.add_argument("--weighted_loss",action="store_true",help="Uso de pesos de la distribución de clases en función de perdida")
-    parser.add_argument("--epochs", type=int, default=200, help="Número de épocas")
+    parser.add_argument("--epochs", type=int, default=100, help="Número de épocas")
     parser.add_argument("--patience", type=int, default=20, help="Paciencia para early stopping")
     
     parser.add_argument("--seed", type=int, default=98, help="Semilla aleatoria")
