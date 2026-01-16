@@ -179,7 +179,8 @@ class KEEPForGleason(nn.Module):
 
     def forward(self, images):
         # Codificación del encoder visual
-        features_list = [
+        
+        '''features_list = [
             torch.stack([
                 self.base.encode_image(
                     patch.unsqueeze(0).unsqueeze(0) if patch.dim() == 2
@@ -189,6 +190,11 @@ class KEEPForGleason(nn.Module):
                 for patch in img.squeeze(0)
             ])
             for img in images
-        ]
+        ]'''
+        lengths = [int(t.size(0)) for t in images]
+        all_patches = torch.cat([t for t in images if t.size(0) > 0], dim=0)
+        all_features = self.base.encode_image(all_patches)
+        features_list = list(torch.split(all_features, lengths, dim=0))
+        
         wsi_prediction, patchs_prediction, weights_tensor_list = self.classifier(features_list)
         return wsi_prediction, patchs_prediction, weights_tensor_list
