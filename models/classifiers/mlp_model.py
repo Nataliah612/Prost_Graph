@@ -47,7 +47,7 @@ class model_mlp(nn.Module):
             chunk_gpu = chunk.to(device, non_blocking=True)
             x_features = self.embedding(chunk_gpu) # EMBEDDING GLEASON GRADE
             x_class = self.classifier(x_features.squeeze()) # CLASIFICATOR GLEASON GRADE
-            x_probs = torch.softmax(x_class, dim = 1)      # Activation function 
+            x_probs = torch.softmax(x_class, dim = 1) if x_class.size(1) > 1 else torch.softmax(x_class.unsqueeze(dim=0), dim = 1)     # Activation function 
 
             # Guardamos los resultados (son vectores pequeños, caben bien en GPU)
             all_features.append(x_features.squeeze())

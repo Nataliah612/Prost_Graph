@@ -162,7 +162,9 @@ def get_keep_ia3_model(clasification_model = 'graph',pretrain=False):
         model_class = model_mlp(mil_aggregation_mode='attentionMIL',chunk_size=512)
 
     elif clasification_model == 'mean_aggre':
-        model_class = model_mean_aggre()
+        model_class = model_mlp(mil_aggregation_mode='mean',chunk_size=512)
+    elif clasification_model == 'max_aggre':
+        model_class = model_mlp(mil_aggregation_mode='max',chunk_size=512)
     else:
         print("Error: clasification_model no reconocido")
 
@@ -179,22 +181,19 @@ class KEEPForGleason(nn.Module):
 
     def forward(self, images):
         # Codificación del encoder visual
-        
-        '''features_list = [
-            torch.stack([
-                self.base.encode_image(
-                    patch.unsqueeze(0).unsqueeze(0) if patch.dim() == 2
-                    else patch.unsqueeze(0) if patch.dim() == 3 and patch.shape[0] in (1, 3)
-                    else patch.permute(2, 0, 1).unsqueeze(0)
-                )
-                for patch in img.squeeze(0)
-            ])
-            for img in images
-        ]'''
         lengths = [int(t.size(0)) for t in images]
         all_patches = torch.cat([t for t in images if t.size(0) > 0], dim=0)
-        all_features = self.base.encode_image(all_patches)
-        features_list = list(torch.split(all_features, lengths, dim=0))
+        
+        chunks = torch.split(all_patches, 512, dim=0)
+        
+        all_features =  []
+
+        # 4. Procesar chunk a chunk en GPU
+        for chunk in chunks:
+            features = self.base.encode_image(chunk)
+            all_features.append(features)
+        total_feats = torch.cat(all_features, dim=0)
+        features_list = list(torch.split(total_feats, lengths, dim=0))
         
         wsi_prediction, patchs_prediction, weights_tensor_list = self.classifier(features_list)
         return wsi_prediction, patchs_prediction, weights_tensor_list

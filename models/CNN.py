@@ -32,7 +32,10 @@ class CNNEmbedder(nn.Module):
             model_class = model_mlp(mil_aggregation_mode='attentionMIL',chunk_size=512)
 
         elif clasification_model == 'mean_aggre':
-            model_class = model_mean_aggre()
+            model_class = model_mlp(mil_aggregation_mode='mean',chunk_size=512)
+        elif clasification_model == 'max_aggre':
+            model_class = model_mlp(mil_aggregation_mode='max',chunk_size=512)
+            #model_class = model_mean_aggre()
         else:
             print("Error: clasification_model no reconocido")
             
