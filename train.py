@@ -76,7 +76,7 @@ def main():
     torch.cuda.empty_cache()
    
     set_multiple_seed(args.seed)
-    args.small_dataset_for_test = True
+
     print("Creating PANDA Train Dataset ...", flush = True)
     df_train  = create_file_label_df(args.panda_img_folder, args.panda_df_path, small_dataset_for_test= args.small_dataset_for_test)
     df_train = df_train.sort_values(by=['patients']).reset_index(drop=True)
