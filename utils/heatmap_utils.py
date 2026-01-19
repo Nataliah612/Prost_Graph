@@ -96,15 +96,23 @@ def build_heatmap(coords, scores, weights, patch_size=512, scale_factor=16, save
 
     return img
 
+from PIL import Image
+import numpy as np
+
 def overlay_heatmap_on_image(orig, heatmap, alpha=0.45):
     """Devuelve el overlay del heatmap sobre la imagen original."""
+
+    # Si heatmap es numpy array → convertir a PIL
+    if isinstance(heatmap, np.ndarray):
+        heatmap = Image.fromarray(heatmap)
+
     if heatmap.mode != "RGB":
         heatmap = heatmap.convert("RGB")
-    
+
     heatmap_resized = heatmap.resize(orig.size)
-    # Asegurar que el heatmap sea RGB
-    
-    return Image.blend(orig, heatmap_resized, alpha)
+
+    return Image.blend(orig.convert("RGB"), heatmap_resized, alpha)
+
 
 def draw_gt_patches(orig_img, file_name,mask_folder="/workspace/data/annotation_masks_SICAP", alpha=0.45):
     """

@@ -320,6 +320,7 @@ def run_epoch(model, dataloader, device, accelerator,
             for i in range(batch_sz):
                 slide_out = {
                     "slide_id": patch_id[i],
+                    "wsi_logits": (pred_primary[i], pred_secondary[i]),
                     "coords": coords[i],
                     "scores": torch.argmax(patchs_prediction[i], dim=1).cpu().numpy(), 
                     "weights": weights_tensor_list[i]
