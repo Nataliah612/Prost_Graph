@@ -325,9 +325,9 @@ if __name__ == "__main__":
     else:
         print("Running multiple experiments ...", flush = True)
         experiments = [
-            dict(extractor_model='KEEP', optimizer='AdamW',classification_mode='graph', pretrain = True),
-            dict(extractor_model='KEEP', optimizer='AdamW',classification_mode='mlp', pretrain = True),
-            dict(extractor_model='KEEP', optimizer='AdamW',classification_mode='max_aggre', pretrain = True), 
+            #dict(extractor_model='KEEP', optimizer='AdamW',classification_mode='graph', pretrain = True),
+            #dict(extractor_model='KEEP', optimizer='AdamW',classification_mode='mlp', pretrain = True),
+            #dict(extractor_model='KEEP', optimizer='AdamW',classification_mode='max_aggre', pretrain = True), 
             dict(extractor_model='KEEP', optimizer='AdamW',classification_mode='mlp'),
             dict(extractor_model='KEEP', optimizer='AdamW',classification_mode='max_aggre'),
             #dict(extractor_model='CNN', optimizer='AdamW',classification_mode='graph'),
