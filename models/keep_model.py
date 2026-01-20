@@ -184,7 +184,7 @@ class KEEPForGleason(nn.Module):
         lengths = [int(t.size(0)) for t in images]
         all_patches = torch.cat([t for t in images if t.size(0) > 0], dim=0)
         
-        chunks = torch.split(all_patches, 64, dim=0)
+        chunks = torch.split(all_patches, 4, dim=0)
         
         all_features =  []
 
