@@ -147,15 +147,10 @@ def get_keep_ia3_model(clasification_model = 'graph',pretrain=False):
    
     model = torch.compile(model) # Activar torch.compile si usas PyTorch 2.0+
     
-    '''for name, param in ia3_model.named_parameters():
-        if pretrain == True:
-            if "visual.blocks.23.attn.proj.ia3_l" or "visual.blocks.22.attn.proj.ia3_l" in name: # or "visual.blocks.21.attn.proj.ia3_l"
-                param.requires_grad = True
-            else:
-                param.requires_grad = False
-        else:
+    for name, param in ia3_model.named_parameters():
+        if pretrain == False:
             param.requires_grad = False
-    ia3_model.print_trainable_parameters()'''
+    #ia3_model.print_trainable_parameters()
 
     # Envolver con tu modelo final
     if clasification_model == 'graph':
@@ -173,7 +168,10 @@ def get_keep_ia3_model(clasification_model = 'graph',pretrain=False):
         print("Error: clasification_model no reconocido")
 
     net = KEEPForGleason(ia3_model, model_class)
-   
+
+    trainable_params = sum(p.numel() for p in net.parameters() if p.requires_grad)
+    print("Parámetros entrenables:", trainable_params)
+    
     return net
 
 class KEEPForGleason(nn.Module):
