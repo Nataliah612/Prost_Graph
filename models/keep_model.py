@@ -87,11 +87,11 @@ class KEEPModel(PreTrainedModel):
     def forward(self, image_inputs, text_inputs):
         vision_features = self.encode_image(image_inputs)
         
-        text_features = self.encode_text(text_inputs)
+        #text_features = self.encode_text(text_inputs)
 
         return {
             "vision_features": vision_features,  
-            "text_features": text_features       
+            #"text_features": text_features       
         }
 
 def get_keep_ia3_model(clasification_model = 'graph',pretrain=False):
@@ -126,6 +126,9 @@ def get_keep_ia3_model(clasification_model = 'graph',pretrain=False):
     
     model.config.use_cache = False  # Reducir uso de memoria durante forward
 
+    for param in model.parameters():
+        param.requires_grad = False
+
     # Identificar módulos lineales donde aplicar IA3
     target_modules = []
     for name, module in model.named_modules():
@@ -133,9 +136,9 @@ def get_keep_ia3_model(clasification_model = 'graph',pretrain=False):
             key in name for key in ["attn.qkv", "attn.proj"]#, "mlp.fc1", "mlp.fc2"]
         ):
             target_modules.append(name)
+    
 
-    ia3_config = IA3Config(
-        target_modules=target_modules,
+    ia3_config = IA3Config(target_modules=target_modules,
         feedforward_modules=target_modules,
         task_type="FEATURE_EXTRACTION" #SEQ_CLS
     )
@@ -144,7 +147,7 @@ def get_keep_ia3_model(clasification_model = 'graph',pretrain=False):
    
     model = torch.compile(model) # Activar torch.compile si usas PyTorch 2.0+
     
-    for name, param in ia3_model.named_parameters():
+    '''for name, param in ia3_model.named_parameters():
         if pretrain == True:
             if "visual.blocks.23.attn.proj.ia3_l" or "visual.blocks.22.attn.proj.ia3_l" in name: # or "visual.blocks.21.attn.proj.ia3_l"
                 param.requires_grad = True
@@ -152,7 +155,7 @@ def get_keep_ia3_model(clasification_model = 'graph',pretrain=False):
                 param.requires_grad = False
         else:
             param.requires_grad = False
-    ia3_model.print_trainable_parameters()
+    ia3_model.print_trainable_parameters()'''
 
     # Envolver con tu modelo final
     if clasification_model == 'graph':
@@ -163,6 +166,7 @@ def get_keep_ia3_model(clasification_model = 'graph',pretrain=False):
 
     elif clasification_model == 'mean_aggre':
         model_class = model_mlp(mil_aggregation_mode='mean',chunk_size=512)
+        
     elif clasification_model == 'max_aggre':
         model_class = model_mlp(mil_aggregation_mode='max',chunk_size=512)
     else:

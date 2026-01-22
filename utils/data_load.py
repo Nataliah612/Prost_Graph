@@ -15,7 +15,7 @@ def create_file_label_df(images_path, data_path, NAME='', slide_col='image_id', 
     gleason_score, gleason_primary_list, gleason_secondary_list= [], [],[]
 
     df = pd.read_excel(data_path)
-    df = df.head(500) if small_dataset_for_test else df
+    df = df.head(150) if small_dataset_for_test else df
 
     wsis = [f for f in os.listdir(images_path) if f.endswith('.h5')]
     for f in tqdm(wsis, desc="Procesando WSIs", file=sys.stdout):
@@ -97,7 +97,7 @@ class WSI_Dataset(Dataset):
                 )
                 with h5py.File(features_path, "r", swmr=True) as h5_file:
                     imgs = h5_file["imgs"][:]
-                    if imgs.shape[0]==1:
+                    if len(imgs.shape)==3:
                         continue
                     coords = h5_file["coords"][:] if inference_heatmap else None
                 self.labels.append(label)

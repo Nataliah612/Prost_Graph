@@ -52,7 +52,8 @@ class model_mlp(nn.Module):
             x_probs = torch.softmax(x_class, dim = 1) if x_class.size(1) > 1 else torch.softmax(x_class.unsqueeze(dim=0), dim = 1)     # Activation function 
 
             # Guardamos los resultados (son vectores pequeños, caben bien en GPU)
-            all_features.append(x_features.squeeze())
+            x_features = x_features.unsqueeze(dim=0) if x_features.dim() == 1 else x_features.squeeze()
+            all_features.append(x_features)
             all_probs.append(x_probs.squeeze())
 
         #patchs_probs_list = list(torch.split(x_probs, lengths, dim=0))
