@@ -63,7 +63,7 @@ class model_mlp(nn.Module):
                 x_probs = x_probs.squeeze(0)
 
             all_features.append(x_features)
-            all_probs.append(x_probs.squeeze())
+            all_probs.append(x_probs)
 
         #patchs_probs_list = list(torch.split(x_probs, lengths, dim=0))
         total_feats = torch.cat(all_features, dim=0) # (N_total, embed_dim)
