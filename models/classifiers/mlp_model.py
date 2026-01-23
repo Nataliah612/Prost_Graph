@@ -56,6 +56,11 @@ class model_mlp(nn.Module):
                 x_features = x_features.unsqueeze(0)      # [D] -> [1, D]
             elif x_features.dim() == 3:
                 x_features = x_features.squeeze(0)         # [1, N, D] -> [N, D]
+            
+            if x_probs.dim() == 1:
+                x_probs = x_probs.unsqueeze(0)      # [D] -> [1, D]
+            elif x_probs.dim() == 3:
+                x_probs = x_probs.squeeze(0)
 
             all_features.append(x_features)
             all_probs.append(x_probs.squeeze())
