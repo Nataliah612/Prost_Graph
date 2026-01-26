@@ -329,7 +329,7 @@ if __name__ == "__main__":
             dict(extractor_model='KEEP', optimizer='AdamW',classification_mode='mlp', pretrain = True),
             dict(extractor_model='KEEP', optimizer='AdamW',classification_mode='mlp'),
             dict(extractor_model='KEEP', optimizer='AdamW',classification_mode='graph'),
-            #dict(extractor_model='CNN', optimizer='AdamW',classification_mode='graph'),
+            dict(extractor_model='CNN', optimizer='AdamW',classification_mode='graph'),
             dict(extractor_model='CNN', optimizer='AdamW',classification_mode='mlp'),
             dict(extractor_model='KEEP', optimizer='AdamW',classification_mode='max_aggre'),
             dict(extractor_model='KEEP', optimizer='AdamW',classification_mode='max_aggre', pretrain = True), 
