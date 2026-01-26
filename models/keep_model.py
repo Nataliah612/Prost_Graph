@@ -181,12 +181,12 @@ class KEEPForGleason(nn.Module):
         self.classifier = classifier_model
         self.classifier.apply(weights_init)
 
-    def forward(self, images):
+    def forward(self, images, chunks_length=4):
         # Codificación del encoder visual
         lengths = [int(t.size(0)) for t in images]
         all_patches = torch.cat([t for t in images if t.size(0) > 0], dim=0)
         
-        chunks = torch.split(all_patches, 16, dim=0)
+        chunks = torch.split(all_patches, chunks_length, dim=0)
         
         all_features =  []
 
