@@ -119,7 +119,7 @@ def compute_multilabel_metrics(y_true_onehot, y_prob, multilabel_prob_threshold=
     metrics["f1_weighted"] = f1_score(
         y_true_onehot, y_pred, average="weighted", zero_division=0
     )
-
+  
     # ----- AUROC -----
     try:
         metrics["auroc_macro"] = roc_auc_score(
