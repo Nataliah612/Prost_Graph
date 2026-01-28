@@ -71,7 +71,7 @@ class gat(torch.nn.Module):
 
         # aggregation por WSI usando batch_idx | Pesos de importancia de los parches 
         w = self.Aggr(z1, batch_idx)
-        
+        w = torch.softmax(w, dim=0)  
         # 5) Weighted per WSI
         weighted = w * probs             # (N_total, 4)
 

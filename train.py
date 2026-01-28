@@ -49,7 +49,7 @@ def parse_args():
     parser.add_argument("--learning_rate", type=float, default=1e-4, help="Learning rate")
     parser.add_argument("--weight_decay", type=float, default=1e-5, help="Weight decay")
     parser.add_argument("--weighted_loss",action="store_true",help="Uso de pesos de la distribución de clases en función de perdida")
-    parser.add_argument("--epochs", type=int, default=100, help="Número de épocas")
+    parser.add_argument("--epochs", type=int, default=200, help="Número de épocas")
     parser.add_argument("--patience", type=int, default=20, help="Paciencia para early stopping")
     
     parser.add_argument("--seed", type=int, default=98, help="Semilla aleatoria")
@@ -325,12 +325,12 @@ if __name__ == "__main__":
     else:
         print("Running multiple experiments ...", flush = True)
         experiments = [
-            #dict(extractor_model='KEEP', optimizer='AdamW',classification_mode='graph', pretrain = True),
-            #dict(extractor_model='KEEP', optimizer='AdamW',classification_mode='mlp', pretrain = True),
-            dict(extractor_model='KEEP', optimizer='AdamW',classification_mode='mlp'),
+            dict(extractor_model='KEEP', optimizer='AdamW',classification_mode='graph', pretrain = True),
+            dict(extractor_model='KEEP', optimizer='AdamW',classification_mode='mlp', pretrain = True),
+            #dict(extractor_model='KEEP', optimizer='AdamW',classification_mode='mlp'),
             #dict(extractor_model='KEEP', optimizer='AdamW',classification_mode='graph'),
             #dict(extractor_model='CNN', optimizer='AdamW',classification_mode='graph'),
-            dict(extractor_model='CNN', optimizer='AdamW',classification_mode='mlp'),
+            #dict(extractor_model='CNN', optimizer='AdamW',classification_mode='mlp'),
             dict(extractor_model='KEEP', optimizer='AdamW',classification_mode='max_aggre'),
             dict(extractor_model='KEEP', optimizer='AdamW',classification_mode='max_aggre', pretrain = True), 
             dict(extractor_model='CNN', optimizer='AdamW',classification_mode='max_aggre'),
