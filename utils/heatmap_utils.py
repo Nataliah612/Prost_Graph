@@ -2,6 +2,8 @@ from PIL import Image, ImageEnhance
 import numpy as np
 import os 
 import sys
+import matplotlib.cm as cm
+import cv2
 
 current_dir  = os.path.abspath(os.getcwd())# Directorio actual
 sys.path.append(os.path.dirname(current_dir))
@@ -96,8 +98,169 @@ def build_heatmap(coords, scores, weights, patch_size=512, scale_factor=16, save
 
     return img
 
-from PIL import Image
+
+
+def gt_building(wsi_path, green_folder, file_name, factor= 16, dataset = 'SICAP' ): 
+
+    orig = Image.open(wsi_path)
+    w, h = orig.size
+    new_size = (w // factor, h // factor)
+    orig = orig.resize(new_size, Image.Resampling.BICUBIC)
+    file_name = file_name.split("/")[-1]
+    if dataset == 'SICAP':
+        slide_id_png = file_name.replace('.jpg','') + '.png'
+    else:
+        slide_id_png = file_name
+    green_path = os.path.join(green_folder,slide_id_png)
+    green = Image.open(green_path)
+    green = green.resize(new_size, Image.Resampling.BICUBIC)
+    return orig, green, h, w
+
+def heatmap_building(h,w, mask, w_mask, grades, slide_id, factor):
+    heatmap = np.zeros((h//factor, w//factor, 3), dtype=np.float32)
+
+    # Cargar tissue una sola vez
+    #slide_id = slide_id.split('/')[-1]
+    #tissue_path = os.path.join('/workspace/data/annotation_masks_SICAP',  f"{slide_id}")
+    #print(f" Cargando tissue mask desde: {tissue_path} ")
+    #tissue = np.array(Image.open(tissue_path))
+
+    for index, pred_name in enumerate(grades):
+
+        class_id = pred_name.item()
+
+        # Máscara binaria
+        mask_bin = (mask == class_id).astype(np.float32)
+
+        # Máscara ponderada
+        mask_pred = mask_bin * w_mask
+
+        if mask_pred.max() == 0:
+            continue
+
+        # Normalizar a [0,1]
+        mask_pred = mask_pred / mask_pred.max()
+
+        # --- COLORES ---
+        grade_colormaps = {
+            0: cm.Blues,    # azul
+            1: cm.Greens,   #YlOrBr,   # amarillo
+            2: cm.Oranges, # naranja
+            3: cm.Reds     # rojo
+        }
+
+        color_map_fn = grade_colormaps.get(class_id, cm.Greys)
+        color_map = color_map_fn(mask_pred)
+
+        # Quitar alpha
+        color_map = color_map[:, :, :3]
+
+        # Fondo negro
+        color_map[mask_pred == 0] = 0
+
+        # Aplicar tissue mask
+        #color_map[tissue == 0] = 0
+
+        # Acumular (sumar heatmaps)
+        heatmap += color_map
+
+
+    # Clamp y convertir a uint8
+    heatmap_join = np.clip(heatmap, 0, 1)
+    heatmap_join = (heatmap_join * 255).astype(np.uint8)
+    return heatmap_join
+
 import numpy as np
+
+def build_heatmap_binary(coords, scores, weights, height, width, patch_size=512, scale_factor=16):
+    width = width // scale_factor
+    height = height // scale_factor
+    #coords = coords // scale_factor
+    #patch_size = patch_size // scale_factor
+
+    '''max_x, max_y = coords[:, 0].max(), coords[:, 1].max()
+    min_x, min_y = coords[:, 0].min(), coords[:, 1].min()
+
+    width  = max_x - min_x + 1
+    height = max_y - min_y + 1
+
+    shifted_coords = coords.copy()
+    shifted_coords[:, 0] -= min_x
+    shifted_coords[:, 1] -= min_y'''
+
+    num_classes = np.unique(scores) #scores.shape[0]
+    masks = np.zeros((height, width), dtype=np.float32)
+    
+    for (x, y), s in zip(coords, scores):
+        x_start, y_start = x, y
+        x_end, y_end = min(x + patch_size, width), min(y + patch_size, height)
+        masks[y_start:y_end, x_start:x_end] += s
+       
+    m_weights = np.zeros((height, width), dtype=np.float32)
+    for (x, y), w in zip(coords, weights):
+        x_start, y_start = x, y
+        x_end, y_end = min(x + patch_size, width), min(y + patch_size, height)
+        
+        m_weights[y_start:y_end, x_start:x_end] += w.item()
+    
+    return masks, m_weights
+
+def overlay_inside_green_line(
+    base_img,
+    overlay_img,
+    green_thresh=(150, 100, 100)
+):
+    """
+    Sobrepone una imagen sobre otra haciendo transparente todo lo que
+    queda fuera de una línea verde cerrada.
+
+    Parámetros:
+    - base_image_path: imagen que contiene la línea verde
+    - overlay_image_path: imagen a sobreponer
+    - output_path: ruta donde se guarda el resultado
+    - green_thresh: (g_min, r_max, b_max) para detectar verde
+    """
+
+    # --- Cargar imágenes ---
+    #base_img = Image.open(base_image_path).convert("RGBA")
+    #overlay_img = Image.open(overlay_image_path).convert("RGBA")
+
+    if base_img.size != overlay_img.size:
+        raise ValueError("Las imágenes deben tener el mismo tamaño")
+    overlay_img = overlay_img.convert("RGBA")
+    base_np = np.array(base_img)
+    overlay_np = np.array(overlay_img)
+    
+
+    # --- Detectar verde ---
+    r = base_np[:, :, 0]
+    g = base_np[:, :, 1]
+    b = base_np[:, :, 2]
+
+    g_min, r_max, b_max = green_thresh
+
+    green_mask = (g > g_min) & (r < r_max) & (b < b_max)
+
+    # --- Rellenar el interior del contorno ---
+    mask_uint8 = (green_mask.astype(np.uint8)) * 255
+
+    contours, _ = cv2.findContours(
+        mask_uint8, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
+    )
+
+    filled_mask = np.zeros_like(mask_uint8)
+    cv2.drawContours(
+        filled_mask, contours, -1, 255, thickness=cv2.FILLED
+    )
+
+    # --- Aplicar máscara como alpha ---
+    overlay_np[:, :, 3] = filled_mask
+
+    # --- Componer imágenes ---
+    overlay_masked = Image.fromarray(overlay_np, mode="RGBA")
+    #result = Image.alpha_composite(base_img, overlay_masked)
+
+    return overlay_masked
 
 def overlay_heatmap_on_image(orig, heatmap, alpha=0.45):
     """Devuelve el overlay del heatmap sobre la imagen original."""
@@ -152,10 +315,10 @@ def draw_gt_patches(orig_img, file_name,mask_folder="/workspace/data/annotation_
     # --- DEFINIR COLORES POR VALOR DE GRIS ---
     # Ajusta aquí los colores para cada clase:
     color_map = {
-        50:  (255, 255, 0),    # Verde       → Grado 3
-        100: (255, 128, 0),    # Amarillo    → Grado 4
-        150: (255, 128, 0),    # Naranja     → Grado 4 cribiforme
-        200: (255, 0, 0),      # Rojo        → Grado 5
+        50:  (255, 255, 0),    # Amarillo       → Grado 3
+        100: (255, 128, 0),    # Naranja        → Grado 4
+        150: (255, 128, 0),    # Naranja        → Grado 4 cribiforme
+        200: (255, 0, 0),      # Rojo           → Grado 5
     }
 
     # Crear imagen RGB coloreada a partir de la máscara
