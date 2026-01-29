@@ -133,7 +133,7 @@ def get_keep_ia3_model(clasification_model = 'graph',pretrain=False):
     target_modules = []
     for name, module in model.named_modules():
         if isinstance(module, nn.Linear) and any(
-            key in name for key in ["attn.qkv"]#, "attn.proj"]#, "mlp.fc1", "mlp.fc2"]
+            key in name for key in ["attn.qkv", "attn.proj"]#, "mlp.fc1", "mlp.fc2"]
         ):
             target_modules.append(name)
     
@@ -144,13 +144,7 @@ def get_keep_ia3_model(clasification_model = 'graph',pretrain=False):
     )
 
     ia3_model = get_peft_model(model, ia3_config)
-   
-    model = torch.compile(model) # Activar torch.compile si usas PyTorch 2.0+
     
-    if pretrain == False:
-        for name, param in ia3_model.named_parameters():
-            param.requires_grad = False
-    #ia3_model.print_trainable_parameters()
 
     # Envolver con tu modelo final
     if clasification_model == 'graph':
@@ -167,8 +161,16 @@ def get_keep_ia3_model(clasification_model = 'graph',pretrain=False):
     else:
         print("Error: clasification_model no reconocido")
 
-    net = KEEPForGleason(ia3_model, model_class)
+    net = KEEPForGleason(ia3_model, model_class) #PEFT
+    
+    if pretrain == False:
+        for p in net.parameters():
+            p.requires_grad = False
+    
+        for p in model_class.parameters():
+            p.requires_grad = True
 
+    net = torch.compile(net) # Activar torch.compile si usas PyTorch 2.0+
     trainable_params = sum(p.numel() for p in net.parameters() if p.requires_grad)
     print("Parámetros entrenables:", trainable_params)
     

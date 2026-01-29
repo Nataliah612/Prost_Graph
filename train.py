@@ -319,6 +319,7 @@ def run_experiment(data_train, data_val, data_test, sicap_data, accelerator, dev
             save_metrics_to_csv(external_test_metrics, epoch=0,  filepath= os.path.join(run_results_path, "sicap_test_metrics.csv"))
 
 if __name__ == "__main__":
+   
     data_train, data_val, data_test, sicap_data, accelerator, device, args = main()
     if not args.hiperparam_tuning:
         run_experiment(data_train, data_val, data_test, sicap_data, accelerator, device, args)
