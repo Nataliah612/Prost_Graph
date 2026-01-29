@@ -144,7 +144,7 @@ def heatmap_building(h,w, mask, w_mask, grades, slide_id, factor):
         # --- COLORES ---
         grade_colormaps = {
             0: cm.Blues,    # azul
-            1: cm.Greens,   #YlOrBr,   # amarillo
+            1: cm.YlOrBr,   #YlOrBr,   # amarillo
             2: cm.Oranges, # naranja
             3: cm.Reds     # rojo
         }
