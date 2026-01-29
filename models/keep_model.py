@@ -170,7 +170,7 @@ def get_keep_ia3_model(clasification_model = 'graph',pretrain=False):
         for p in model_class.parameters():
             p.requires_grad = True
 
-    net = torch.compile(net) # Activar torch.compile si usas PyTorch 2.0+
+    #net = torch.compile(net) # Activar torch.compile si usas PyTorch 2.0+
     trainable_params = sum(p.numel() for p in net.parameters() if p.requires_grad)
     print("Parámetros entrenables:", trainable_params)
     
@@ -183,7 +183,7 @@ class KEEPForGleason(nn.Module):
         self.classifier = classifier_model
         self.classifier.apply(weights_init)
 
-    def forward(self, images, chunks_length=4):
+    def forward(self, images, chunks_length=128):
         # Codificación del encoder visual
         lengths = [int(t.size(0)) for t in images]
         all_patches = torch.cat([t for t in images if t.size(0) > 0], dim=0)
