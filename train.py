@@ -36,7 +36,7 @@ def parse_args():
 
     parser.add_argument("--extractor_model", type=str, default="KEEP", help="Tipo de modelo encoder para parches ('CNN', 'KEEP')")
     parser.add_argument("--pretrain",action="store_true",help="Descongelar el backbone del encoder para parches")
-    parser.add_argument("--classification_mode", type=str, default="mlp", help="Modo de funcionamiento del MIL ('graph','mlp','mean_aggre')")
+    parser.add_argument("--classification_mode", type=str, default="graph", help="Modo de funcionamiento del MIL ('graph','mlp','mean_aggre')")
 
     parser.add_argument("--small_dataset_for_test",action="store_true",help="Usar un dataset pequeño para pruebas")
     parser.add_argument("--load_on_demand",action="store_true",help="Lectura de imagenes en __getitem__. Cuando no esta activo se precargan en __init__.")
@@ -76,7 +76,7 @@ def main():
     torch.cuda.empty_cache()
    
     set_multiple_seed(args.seed)
-   
+    
     print("Creating PANDA Train Dataset ...", flush = True)
     df_train  = create_file_label_df(args.panda_img_folder, args.panda_df_path, small_dataset_for_test= args.small_dataset_for_test)
     df_train = df_train.sort_values(by=['patients']).reset_index(drop=True)
@@ -133,6 +133,7 @@ def run_experiment(data_train, data_val, data_test, sicap_data, accelerator, dev
 
     # Inicializamos los modelos
     print("Loading models ...", flush = True)
+   
     model = get_model(args.extractor_model,args.classification_mode,args.pretrain).to(device)
 
     # Crear carpeta de resultados
@@ -326,10 +327,10 @@ if __name__ == "__main__":
     else:
         print("Running multiple experiments ...", flush = True)
         experiments = [
-            dict(extractor_model='KEEP', optimizer='AdamW',classification_mode='graph', pretrain = True),
+            #dict(extractor_model='KEEP', optimizer='AdamW',classification_mode='graph', pretrain = True),
             dict(extractor_model='KEEP', optimizer='AdamW',classification_mode='mlp', pretrain = True),
             dict(extractor_model='KEEP', optimizer='AdamW',classification_mode='mlp'),
-            #dict(extractor_model='KEEP', optimizer='AdamW',classification_mode='graph'),
+            dict(extractor_model='KEEP', optimizer='AdamW',classification_mode='graph'),
             #dict(extractor_model='CNN', optimizer='AdamW',classification_mode='graph'),
             dict(extractor_model='CNN', optimizer='AdamW',classification_mode='mlp'),
             dict(extractor_model='KEEP', optimizer='AdamW',classification_mode='max_aggre'),
