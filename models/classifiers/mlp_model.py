@@ -129,8 +129,6 @@ class MILArchitecture(nn.Module):
         lengths: list[int] (n_parches por WSI), sum(lengths) == N_total
         Devuelve: Tensor (batch_size, C) con logits/score por WSI
         """
-        #assert patch_probs.dim() == 2
-        #assert patch_feats.dim() == 2
 
         probs_splits = torch.split(patch_probs, lengths, dim=0)
         feats_splits = torch.split(patch_feats, lengths, dim=0)
@@ -160,5 +158,4 @@ class MILArchitecture(nn.Module):
         
         wsi_logits = torch.stack(wsis, dim=0)  #  
            
-
         return wsi_logits, weights
