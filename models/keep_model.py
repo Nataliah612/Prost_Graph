@@ -128,10 +128,10 @@ def get_keep_ia3_model(clasification_model = 'graph',pretrain=False):
 
     for param in model.parameters():
         param.requires_grad = False
-
+    model_ = model
     # Identificar módulos lineales donde aplicar IA3
     target_modules = []
-    for name, module in model.named_modules():
+    for name, module in model_.named_modules():
         if isinstance(module, nn.Linear) and any(
             key in name for key in ["attn.qkv", "attn.proj"]#, "mlp.fc1", "mlp.fc2"]
         ):
@@ -143,7 +143,7 @@ def get_keep_ia3_model(clasification_model = 'graph',pretrain=False):
         task_type="FEATURE_EXTRACTION" #SEQ_CLS
     )
 
-    ia3_model = get_peft_model(model, ia3_config)
+    ia3_model = get_peft_model(model_, ia3_config)
     
 
     # Envolver con tu modelo final
@@ -161,15 +161,16 @@ def get_keep_ia3_model(clasification_model = 'graph',pretrain=False):
     else:
         print("Error: clasification_model no reconocido")
 
-    net = KEEPForGleason(ia3_model, model_class) #PEFT
-    
     if pretrain == False:
+        net = KEEPForGleason(model, model_class) 
         for p in net.parameters():
             p.requires_grad = False
     
         for p in model_class.parameters():
             p.requires_grad = True
-
+         
+    else:
+        net = KEEPForGleason(ia3_model,model_class)
     #net = torch.compile(net) # Activar torch.compile si usas PyTorch 2.0+
     trainable_params = sum(p.numel() for p in net.parameters() if p.requires_grad)
     print("Parámetros entrenables:", trainable_params)

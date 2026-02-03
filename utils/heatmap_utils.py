@@ -1,4 +1,5 @@
 from PIL import Image, ImageEnhance
+
 import numpy as np
 import os 
 import sys
@@ -35,71 +36,6 @@ def get_model(path):
 
     return model
 
-def build_heatmap(coords, scores, weights, patch_size=512, scale_factor=16, save_path=None):
-    """
-    coords: Nx2 array (x, y)
-    scores: N array con valores 0,1,2,3
-    weights: N array con intensidad (ej. 0–1 o cualquier rango)
-    Produce heatmap en RGB con colores por clase modulados por la intensidad.
-    """
-
-    # Escalar coordenadas
-    coords = coords // scale_factor
-    patch_size = patch_size // scale_factor
-
-    max_x, max_y = coords[:, 0].max(), coords[:, 1].max()
-    min_x, min_y = coords[:, 0].min(), coords[:, 1].min()
-
-    width  = max_x - min_x + 1
-    height = max_y - min_y + 1
-
-    # Ajustar coordenadas
-    shifted_coords = coords.copy()
-    shifted_coords[:, 0] -= min_x
-    shifted_coords[:, 1] -= min_y
-
-    # Heatmap RGB
-    heatmap = np.zeros((height + patch_size, width + patch_size, 3), dtype=np.uint8)
-
-    # Colores base
-    color_map = {
-        3: np.array([255,   0,   0]),  # Rojo
-        2: np.array([255, 128,   0]),  # Naranja
-        1: np.array([255, 255,   0]),  # Amarillo
-        0: np.array([  0,   0, 255])   # Azul
-    }
-
-    # Dibujar los parches modulando por el peso
-    for (x, y), s, w in zip(shifted_coords, scores, weights):
-
-        base_color = color_map.get(int(s), np.array([255, 255, 255]))
-        
-        # Normalizar peso si viene fuera de 0–1
-        #w_norm = (w - weights.min()) / (weights.max() - weights.min())
-        '''p_low, p_high = np.percentile(weights, [5, 99])
-        w_clip = np.clip(weights, p_low, p_high)
-
-        w_norm = (w_clip - p_low) / (p_high - p_low + 1e-8)
-        w_norm = np.sqrt(w_norm)'''
-        w_norm = float(w)
-
-        # Escalar color por intensidad
-        if weights==None:
-            color = color_map.get(int(s), (255, 255, 255))
-        else:
-            color = (base_color * w_norm*10 ).clip(0, 255).astype(np.uint8)
-
-        heatmap[y:y+patch_size, x:x+patch_size] = color
-
-    img = Image.fromarray(heatmap, mode="RGB")
-
-    if save_path:
-        img.save(save_path)
-
-    return img
-
-
-
 def gt_building(wsi_path, green_folder, file_name, factor= 16, dataset = 'SICAP' ): 
 
     orig = Image.open(wsi_path)
@@ -116,14 +52,52 @@ def gt_building(wsi_path, green_folder, file_name, factor= 16, dataset = 'SICAP'
     green = green.resize(new_size, Image.Resampling.BICUBIC)
     return orig, green, h, w
 
+def build_heatmap_binary(coords, scores, weights,
+                          height, width,
+                          patch_size=512,
+                          scale_factor=16):
+
+    width  = int(width  / scale_factor)
+    height = int(height / scale_factor)
+
+    # tamaño real en 20x
+    W20 = max(c[0] for c in coords) + patch_size
+    H20 = max(c[1] for c in coords) + patch_size
+
+    sx = width  / W20
+    sy = height / H20
+
+    masks = np.zeros((height, width), dtype=np.float32)
+    m_weights = np.zeros((height, width), dtype=np.float32)
+
+    for (x, y), s, w in zip(coords, scores, weights):
+
+        # bbox en 20x
+        x0_20, y0_20 = x, y
+        x1_20 = x + patch_size
+        y1_20 = y + patch_size
+
+        # escalar a JPG
+        x0 = int(x0_20 * sx)
+        x1 = int(x1_20 * sx)
+        y0 = int(y0_20 * sy)
+        y1 = int(y1_20 * sy)
+
+        # clip
+        x0 = max(0, min(x0, width  - 1))
+        x1 = max(0, min(x1, width))
+        y0 = max(0, min(y0, height - 1))
+        y1 = max(0, min(y1, height))
+
+        if x0 < x1 and y0 < y1:
+            masks[y0:y1, x0:x1] = s
+            m_weights[y0:y1, x0:x1] += w.item()
+
+    return masks, m_weights
+from matplotlib import cm 
+
 def heatmap_building(h,w, mask, w_mask, grades, slide_id, factor):
     heatmap = np.zeros((h//factor, w//factor, 3), dtype=np.float32)
-
-    # Cargar tissue una sola vez
-    #slide_id = slide_id.split('/')[-1]
-    #tissue_path = os.path.join('/workspace/data/annotation_masks_SICAP',  f"{slide_id}")
-    #print(f" Cargando tissue mask desde: {tissue_path} ")
-    #tissue = np.array(Image.open(tissue_path))
 
     for index, pred_name in enumerate(grades):
 
@@ -169,41 +143,6 @@ def heatmap_building(h,w, mask, w_mask, grades, slide_id, factor):
     heatmap_join = np.clip(heatmap, 0, 1)
     heatmap_join = (heatmap_join * 255).astype(np.uint8)
     return heatmap_join
-
-import numpy as np
-
-def build_heatmap_binary(coords, scores, weights, height, width, patch_size=512, scale_factor=16):
-    width = width // scale_factor
-    height = height // scale_factor
-    #coords = coords // scale_factor
-    #patch_size = patch_size // scale_factor
-
-    '''max_x, max_y = coords[:, 0].max(), coords[:, 1].max()
-    min_x, min_y = coords[:, 0].min(), coords[:, 1].min()
-
-    width  = max_x - min_x + 1
-    height = max_y - min_y + 1
-
-    shifted_coords = coords.copy()
-    shifted_coords[:, 0] -= min_x
-    shifted_coords[:, 1] -= min_y'''
-
-    num_classes = np.unique(scores) #scores.shape[0]
-    masks = np.zeros((height, width), dtype=np.float32)
-    
-    for (x, y), s in zip(coords, scores):
-        x_start, y_start = x, y
-        x_end, y_end = min(x + patch_size, width), min(y + patch_size, height)
-        masks[y_start:y_end, x_start:x_end] += s
-       
-    m_weights = np.zeros((height, width), dtype=np.float32)
-    for (x, y), w in zip(coords, weights):
-        x_start, y_start = x, y
-        x_end, y_end = min(x + patch_size, width), min(y + patch_size, height)
-        
-        m_weights[y_start:y_end, x_start:x_end] += w.item()
-    
-    return masks, m_weights
 
 def overlay_inside_green_line(
     base_img,
