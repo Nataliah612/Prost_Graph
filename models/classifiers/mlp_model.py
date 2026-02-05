@@ -140,13 +140,14 @@ class MILArchitecture(nn.Module):
                     wsis.append(torch.zeros(self.nClasses, device=patch_probs.device))
                 else:
                     wsis.append(torch.max(p, dim=0)[0])
+                weights.append(None)
         elif self.aggregation == 'mean':
             for p in probs_splits:
                 if p.size(0) == 0:
                     wsis.append(torch.zeros(self.nClasses, device=patch_probs.device))
                 else:
                     wsis.append(torch.mean(p, dim=0))
-
+                weights.append(None)
         elif self.aggregation == 'attentionMIL':
             for p, f in zip(probs_splits, feats_splits):
                 wsi, weight = self.attentionModule(p, f)
