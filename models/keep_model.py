@@ -162,7 +162,7 @@ def get_keep_ia3_model(clasification_model = 'graph',pretrain=False):
         print("Error: clasification_model no reconocido")
 
     if pretrain == False:
-        net = KEEPForGleason(model, model_class) 
+        net = KEEPForGleason(model, model_class) #model
         for p in net.parameters():
             p.requires_grad = False
     
