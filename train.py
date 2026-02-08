@@ -333,10 +333,10 @@ if __name__ == "__main__":
             #dict(extractor_model='KEEP', optimizer='AdamW',classification_mode='graph'),
             #dict(extractor_model='CNN', optimizer='AdamW',classification_mode='graph'),
             #dict(extractor_model='CNN', optimizer='AdamW',classification_mode='mlp'),
-            dict(extractor_model='KEEP', optimizer='AdamW',classification_mode='max_aggre'),
+            #dict(extractor_model='KEEP', optimizer='AdamW',classification_mode='max_aggre'),
             #dict(extractor_model='KEEP', optimizer='AdamW',classification_mode='max_aggre', pretrain = True), 
             dict(extractor_model='CNN', optimizer='AdamW',classification_mode='max_aggre'),
-            #dict(extractor_model='KEEP', optimizer='AdamW',classification_mode='mean_aggre', pretrain = True), 
+            dict(extractor_model='KEEP', optimizer='AdamW',classification_mode='graph', pretrain = True, alpha_pe=0.1, alpha_pc=0.1), 
             #dict(extractor_model='KEEP', optimizer='AdamW',classification_mode='mean_aggre'),
             #dict(extractor_model='CNN', optimizer='AdamW',classification_mode='mean_aggre'),
         ]
