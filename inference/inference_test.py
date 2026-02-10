@@ -35,7 +35,7 @@ filtered_state_peft = {
     if any(k.startswith(kw) for kw in KEYWORDS)
 }
 
-missing_p, unexpected_p = model_peft.load_state_dict(filtered_state_peft, strict=True) ### False
+missing_p, unexpected_p = model_peft.load_state_dict(filtered_state_peft, strict=False) ### False
 model_peft.eval().to(device)
 
 KEYWORDS = ("base")
@@ -105,7 +105,8 @@ with torch.no_grad():
         p.mean(dim=0) if p.numel() > 0 else torch.zeros(wsi_logits.size(1), device=wsi_logits.device)
         for p in patch_probs], dim=0)  # (B,4)
   
-        pred_primary, pred_secondary = select_gleason_grades_from_batch_proportions(wsi_proportions, min_presence_thresh=0.2, secondary_ratio_thresh=0.2 )
+        pred_primary, pred_secondary = select_gleason_grades_from_batch_proportions(wsi_proportions, min_presence_thresh=0.3, secondary_ratio_thresh=0.4 )
+        #Multilabel_prob_threshold 0.1 - min_presence_threshold: 0.3 - secondary_ratio_threshold: 0.4
 
         # --- Probabilidades asociadas ---
         probs = wsi_logits.detach().cpu()
@@ -130,7 +131,7 @@ y_onehot = torch.cat(all_y_true_onehot).numpy()
 metrics = compute_all_gleason_metrics(y_true_primary=y_true1, y_pred_primary=y_pred1,
                                         y_true_secondary=y_true2, y_pred_secondary=y_pred2,
                                         y_true_onehot=y_onehot, y_probs=probs, 
-                                        multilabel_prob_threshold = 0.15)
+                                        multilabel_prob_threshold = 0.1)#0.15)
 
 # Inicializar valores opcionales
 val_multilabel_prob_threshold = None
@@ -138,6 +139,6 @@ val_min_presence_threshold = None
 val_secondary_ratio_threshold = None
 heatmap_dataframe = None
 ckpt_path = "/workspace/results"
-log_epoch_metrics("SICAP dataset", "Test_PIXn", metrics, 0, os.path.join(ckpt_path, "inference.txt"))
-save_metrics_to_csv(metrics, epoch=0,  filepath= os.path.join(ckpt_path, "inference.csv"))
+#log_epoch_metrics("SICAP dataset", "Test_PIXn", metrics, 0, os.path.join(ckpt_path, "inference.txt"))
+#save_metrics_to_csv(metrics, epoch=0,  filepath= os.path.join(ckpt_path, "inference.csv"))
 

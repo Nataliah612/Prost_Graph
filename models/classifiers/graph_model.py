@@ -40,13 +40,13 @@ def grafo_fully_connected(x):
     return Data(x=x, edge_index=edge_index)
 
 class gat(torch.nn.Module):
-    def __init__(self, heads=8):
+    def __init__(self, heads=4): #def __init__(self, heads=8):
         super(gat, self).__init__()
-        self.gat1 = GATv2Conv(768, 256, heads=heads, concat=False)
-        self.gat2 = GATv2Conv(256, 64, heads=heads, concat=False)
-        
-        self.Aggr = Aggregate_Attnt(L=256, I=1)
-        
+        #self.gat1 = GATv2Conv(768, 256, heads=heads, concat=False)
+        #self.gat2 = GATv2Conv(256, 64, heads=heads, concat=False)
+        self.gat1 = GATv2Conv(768, 64, heads=heads, concat=False)
+        #self.Aggr = Aggregate_Attnt(L=256, I=1)
+        self.Aggr = Aggregate_Attnt(L=768, I=1)
         self.classifier = mlp(in_dim=64, out_dim=4)
 
     def forward(self, graph_list):
@@ -62,15 +62,15 @@ class gat(torch.nn.Module):
         z1 = self.gat1(x, edge_index)
         z1 = F.relu(z1)
 
-        z2 = self.gat2(z1, edge_index)
-        z2 = F.relu(z2)
+        #z2 = self.gat2(z1, edge_index)
+        #z2 = F.relu(z2)
 
         # Clasificador por patch
-        logits = self.classifier(z2)
+        logits = self.classifier(z1)
         probs = torch.softmax(logits, dim=1)
 
         # aggregation por WSI usando batch_idx | Pesos de importancia de los parches 
-        w = self.Aggr(z1, batch_idx)
+        w = self.Aggr(x, batch_idx)
         w = torch.softmax(w, dim=0)  
         # 5) Weighted per WSI
         weighted = w * probs             # (N_total, 4)
