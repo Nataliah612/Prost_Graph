@@ -71,20 +71,24 @@ class gat(torch.nn.Module):
 
         # aggregation por WSI usando batch_idx | Pesos de importancia de los parches 
         w = self.Aggr(x, batch_idx)
-                  # (N_total, 4)
 
         # 6) Reconstruir patch predictions por WSI
         patch_output = torch.split(probs, lengths.tolist(), dim=0)
         w_output = torch.split(w, lengths.tolist(), dim=0)
 
-        w = [torch.softmax(w_patch, dim= 0) for w_patch in w_output] # 1  
         # 5) Weighted per WSI
-        weighted = w * probs   
+        wsi_list, weight_list = [],[]
 
-        idx = torch.repeat_interleave(torch.arange(len(lengths), device=weighted.device), lengths)
-        out_wsi = torch.zeros(len(lengths), weighted.size(1), device=weighted.device).index_add_(0, idx, weighted)
-
-        return out_wsi, patch_output, w_output
+        for p, f in zip(patch_output, w_output):
+            f = torch.softmax(f, dim= 0)
+            agge = p * f.unsqueeze(1)
+            agre_sum = agge.sum(dim=0)
+            wsi_list.append(agre_sum) 
+            weight_list.append(f)          # (num_classes,)
+       
+        out_wsi = torch.stack(wsi_list, dim=0)
+        
+        return out_wsi, patch_output, weight_list
 
 class Aggregate_Attnt(nn.Module):
     def __init__(self, L=512, I=1):
