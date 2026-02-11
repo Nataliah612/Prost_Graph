@@ -59,25 +59,27 @@ class gat(torch.nn.Module):
         lengths = batch.ptr[1:] - batch.ptr[:-1]   # Guardar el numero de parches por WSI 
 
         # GATConv 
-        z1 = self.gat1(x, edge_index)
+        z1 = self.gat1(x, edge_index) #| (N_parches, 64)
         z1 = F.relu(z1)
 
         #z2 = self.gat2(z1, edge_index)
         #z2 = F.relu(z2)
 
         # Clasificador por patch
-        logits = self.classifier(z1)
+        logits = self.classifier(z1) #| (N_parches, 4)
         probs = torch.softmax(logits, dim=1)
 
         # aggregation por WSI usando batch_idx | Pesos de importancia de los parches 
         w = self.Aggr(x, batch_idx)
-        w = torch.softmax(w, dim=0)  
-        # 5) Weighted per WSI
-        weighted = w * probs             # (N_total, 4)
+                  # (N_total, 4)
 
         # 6) Reconstruir patch predictions por WSI
         patch_output = torch.split(probs, lengths.tolist(), dim=0)
         w_output = torch.split(w, lengths.tolist(), dim=0)
+
+        w = [torch.softmax(w_patch, dim= 0) for w_patch in w_output] # 1  
+        # 5) Weighted per WSI
+        weighted = w * probs   
 
         idx = torch.repeat_interleave(torch.arange(len(lengths), device=weighted.device), lengths)
         out_wsi = torch.zeros(len(lengths), weighted.size(1), device=weighted.device).index_add_(0, idx, weighted)
@@ -97,8 +99,8 @@ class Aggregate_Attnt(nn.Module):
         xb = self.branch_2(x)
         A = xa.mul(xb)
         A = self.branch_3(A)
-        gate = softmax(A, index=batch_idx, num_nodes=x.size(0))
-        return gate
+        #gate = softmax(A, index=batch_idx, num_nodes=x.size(0))
+        return A.squeeze(-1) 
 
 class mlp(nn.Module): #Clasificador 
     def __init__(self, in_dim=64, out_dim=4):
