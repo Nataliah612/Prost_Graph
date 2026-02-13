@@ -47,7 +47,7 @@ def parse_args():
     parser.add_argument("--optimizer", type=str, default="AdamW", help="Optimizador (SGD, AdamW)")
     parser.add_argument("--momentum", type=float, default=0.9, help="Momentum. Solo para SGD")
     parser.add_argument("--learning_rate", type=float, default=1e-4, help="Learning rate")
-    parser.add_argument("--weight_decay", type=float, default=1e-5, help="Weight decay")
+    parser.add_argument("--weight_decay", type=float, default=1e-4, help="Weight decay")
     parser.add_argument("--weighted_loss",action="store_true",help="Uso de pesos de la distribución de clases en función de perdida")
     parser.add_argument("--epochs", type=int, default=200, help="Número de épocas")
     parser.add_argument("--patience", type=int, default=20, help="Paciencia para early stopping")

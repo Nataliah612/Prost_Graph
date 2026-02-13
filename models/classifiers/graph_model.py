@@ -42,9 +42,9 @@ def grafo_fully_connected(x):
 class gat(torch.nn.Module):
     def __init__(self, heads=4): #def __init__(self, heads=8):
         super(gat, self).__init__()
-        #self.gat1 = GATv2Conv(768, 256, heads=heads, concat=False)
-        #self.gat2 = GATv2Conv(256, 64, heads=heads, concat=False)
-        self.gat1 = GATv2Conv(768, 64, heads=heads, concat=False)
+        self.gat1 = GATv2Conv(768, 256, heads=heads, concat=False)
+        self.gat2 = GATv2Conv(256, 64, heads=heads, concat=False)
+       
         #self.Aggr = Aggregate_Attnt(L=256, I=1)
         self.Aggr = Aggregate_Attnt(L=768, I=1)
         self.classifier = mlp(in_dim=64, out_dim=4)
@@ -62,21 +62,21 @@ class gat(torch.nn.Module):
         z1 = self.gat1(x, edge_index) #| (N_parches, 64)
         z1 = F.relu(z1)
 
-        #z2 = self.gat2(z1, edge_index)
-        #z2 = F.relu(z2)
+        z2 = self.gat2(z1, edge_index)
+        z2 = F.relu(z2)
 
         # Clasificador por patch
-        logits = self.classifier(z1) #| (N_parches, 4)
+        logits = self.classifier(z2) #| (N_parches, 4)
         probs = torch.softmax(logits, dim=1)
 
         # aggregation por WSI usando batch_idx | Pesos de importancia de los parches 
         w = self.Aggr(x, batch_idx)
 
-        # 6) Reconstruir patch predictions por WSI
+        # Reconstruir patch predictions por WSI
         patch_output = torch.split(probs, lengths.tolist(), dim=0)
         w_output = torch.split(w, lengths.tolist(), dim=0)
 
-        # 5) Weighted per WSI
+        # Weighted per WSI
         wsi_list, weight_list = [],[]
 
         for p, f in zip(patch_output, w_output):
@@ -103,7 +103,6 @@ class Aggregate_Attnt(nn.Module):
         xb = self.branch_2(x)
         A = xa.mul(xb)
         A = self.branch_3(A)
-        #gate = softmax(A, index=batch_idx, num_nodes=x.size(0))
         return A.squeeze(-1) 
 
 class mlp(nn.Module): #Clasificador 

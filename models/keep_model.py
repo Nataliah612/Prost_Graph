@@ -113,9 +113,9 @@ def get_keep_ia3_model(clasification_model = 'graph',pretrain=False):
     config = AutoConfig.from_pretrained(model_path + 'config.json',
                                     trust_remote_code=True,             # Ejecuta el codio en remoto
                                     quantization_config=bnb_config,     # Introduce la configuracion de carga del modelo
-                                    #force_download=True,                # Descarga del modelo 
-                                    low_cpu_mem_usage = True            # Reduce memoria en la carga
-    )
+                                    #force_download=True,               # Descarga del modelo 
+                                    low_cpu_mem_usage = True )          # Reduce memoria en la carga
+    
     model = AutoModel.from_config(config)
     state_dict = torch.load(checkpoint_path, map_location='cpu')
     model.load_state_dict(state_dict, strict=True)
@@ -138,13 +138,10 @@ def get_keep_ia3_model(clasification_model = 'graph',pretrain=False):
             target_modules.append(name)
     
 
-    ia3_config = IA3Config(target_modules=target_modules,
-        feedforward_modules=target_modules,
-        task_type="FEATURE_EXTRACTION" #SEQ_CLS
-    )
+    ia3_config = IA3Config(target_modules=target_modules, feedforward_modules=target_modules,task_type="FEATURE_EXTRACTION")
 
     ia3_model = get_peft_model(model_, ia3_config)
-    for param in ia3_model.parameters():
+    for param in model_.parameters():
         param.requires_grad = False
 
     # Envolver con tu modelo final
