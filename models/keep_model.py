@@ -141,9 +141,7 @@ def get_keep_ia3_model(clasification_model = 'graph',pretrain=False):
     ia3_config = IA3Config(target_modules=target_modules, feedforward_modules=target_modules,task_type="FEATURE_EXTRACTION")
 
     ia3_model = get_peft_model(model_, ia3_config)
-    for param in ia3_model.parameters():
-        param.requires_grad = False
-
+    
     # Envolver con tu modelo final
     if clasification_model == 'graph':
         model_class = model_graph()
@@ -182,7 +180,7 @@ class KEEPForGleason(nn.Module):
         self.classifier = classifier_model
         self.classifier.apply(weights_init)
 
-    def forward(self, images, chunks_length=4):
+    def forward(self, images, chunks_length=1):
         # Codificación del encoder visual
         lengths = [int(t.size(0)) for t in images]
         all_patches = torch.cat([t for t in images if t.size(0) > 0], dim=0)

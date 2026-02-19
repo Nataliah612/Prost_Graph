@@ -6,7 +6,6 @@ from torch import Tensor
 from torch_geometric.nn import GATv2Conv
 from torch_geometric.data import Data
 from torch_geometric.data import Batch
-from torch_geometric.utils import softmax
 
 import os
 os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "max_split_size_mb:128"
@@ -42,8 +41,8 @@ def grafo_fully_connected(x):
 class gat(torch.nn.Module):
     def __init__(self, heads=4): #def __init__(self, heads=8):
         super(gat, self).__init__()
-        self.gat1 = GATv2Conv(768, 512, heads=heads, concat=False, dropout=0.2)
-        self.gat2 = GATv2Conv(512, 64, heads=heads, concat=False,dropout=0.2)
+        self.gat1 = GATv2Conv(768, 512, heads=heads, concat=False, dropout=0.3)
+        self.gat2 = GATv2Conv(512, 64, heads=heads, concat=False,dropout=0.3)
         self.bn1 = nn.BatchNorm1d(512)
         self.bn2 = nn.BatchNorm1d(64)
         
