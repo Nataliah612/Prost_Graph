@@ -128,6 +128,7 @@ def get_keep_ia3_model(clasification_model = 'graph',pretrain=False):
 
     for param in model.parameters():
         param.requires_grad = False
+    
     model_ = model
     # Identificar módulos lineales donde aplicar IA3
     target_modules = []
@@ -141,7 +142,8 @@ def get_keep_ia3_model(clasification_model = 'graph',pretrain=False):
     ia3_config = IA3Config(target_modules=target_modules, feedforward_modules=target_modules,task_type="FEATURE_EXTRACTION")
 
     ia3_model = get_peft_model(model_, ia3_config)
-    
+    for param in ia3_model.parameters():
+        param.requires_grad = False
     # Envolver con tu modelo final
     if clasification_model == 'graph':
         model_class = model_graph()
