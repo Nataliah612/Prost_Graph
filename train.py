@@ -69,6 +69,7 @@ def parse_args():
 
 def main():
     args = parse_args()
+
     # Multi-GPU accelerator init
     accelerator = Accelerator()
     device = accelerator.device
@@ -109,7 +110,7 @@ def main():
     fin__load = time.time()
 
     # Comprobar si se debe hacer inferencia con SICAP dataset
-    sicap_data = None
+    #sicap_data = None
     sicap_inference = args.sicap_img_folder is not None and args.sicap_df_path is not None
     if sicap_inference:
         print("Creating SICAP Test Dataset ...", flush=True)

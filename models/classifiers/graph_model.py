@@ -4,8 +4,8 @@ import torch.nn.functional as F
 
 from torch import Tensor
 from torch_geometric.nn import GATv2Conv
-from torch_geometric.data import Data
-from torch_geometric.data import Batch
+from torch_geometric.data import Data, Batch
+from torch_geometric.utils import dropout_edge
 
 import os
 os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "max_split_size_mb:128"
@@ -20,12 +20,14 @@ class model_graph(nn.Module):
 
     def forward(self, x):
         """ x: tensor (B, N, D) """
-        graphs_list = [grafo_fully_connected(xi.squeeze(dim=1)) for xi in x]
+        graphs_list = [grafo_fully_connected(xi.squeeze(dim=1), training=self.training) for xi in x]
        
         out, w1, weights_tensor_list = self.graphgat(graphs_list)
         return out, w1, weights_tensor_list
 
-def grafo_fully_connected(x):
+
+
+def grafo_fully_connected(x, training = False):
     num_nodos = x.shape[0]
     
     # Creamos todas las combinaciones posibles
@@ -35,11 +37,13 @@ def grafo_fully_connected(x):
     # Quitamos autoconexiones 
     mask = fila != col
     edge_index = torch.stack([fila[mask], col[mask]], dim=0)
-
+    
+    edge_index, _ = dropout_edge(edge_index, p=0.3, training=training)
+        
     return Data(x=x, edge_index=edge_index)
 
 class gat(torch.nn.Module):
-    def __init__(self, heads=4): #def __init__(self, heads=8):
+    def __init__(self, heads=2): #def __init__(self, heads=4):
         super(gat, self).__init__()
         self.gat1 = GATv2Conv(768, 512, heads=heads, concat=False, dropout=0.5)# con 0.3 overfitting
         self.gat2 = GATv2Conv(512, 64, heads=heads, concat=False,dropout=0.5)
