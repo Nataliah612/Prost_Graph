@@ -167,7 +167,7 @@ def run_experiment(df_train, data_train, data_val, data_test, sicap_data, accele
     #     loss_BCE = nn.BCELoss(pos_weight=final_weights.to(device))
     # else:
     #     loss_BCE = nn.BCELoss()
-    loss_BCE = nn.BCELoss(pos_weight=final_weights.to(device))
+    loss_BCE = nn.BCELoss(weight=final_weights.to(device))
 
     # Optimizador
     if args.optimizer == "SGD":
