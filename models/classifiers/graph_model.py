@@ -38,7 +38,7 @@ def grafo_fully_connected(x, training = False):
     mask = fila != col
     edge_index = torch.stack([fila[mask], col[mask]], dim=0)
     
-    edge_index, _ = dropout_edge(edge_index, p=0.3, training=training)
+    edge_index, _ = dropout_edge(edge_index, p=0.5, training=training) # Prueba anterior 0.3
         
     return Data(x=x, edge_index=edge_index)
 

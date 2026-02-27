@@ -19,7 +19,7 @@ from accelerate import Accelerator
 from utils.data_load import WSI_Dataset,create_file_label_df, collate_fn
 
 from utils.train_utils import set_multiple_seed
-from utils.train_utils import   get_model, run_epoch
+from utils.train_utils import   get_model, run_epoch, compute_class_weights
 from utils.metrics_utils import  log_epoch_metrics, save_metrics_to_csv #, compute_metrics_by_class
 
 
@@ -69,7 +69,7 @@ def parse_args():
 
 def main():
     args = parse_args()
-
+    
     # Multi-GPU accelerator init
     accelerator = Accelerator()
     device = accelerator.device
@@ -122,10 +122,10 @@ def main():
 
     load_time = fin__load - inicio__load
     print(f"Tiempo de carga en memoria de las WSI: {load_time:.4f} segundos", flush = True)
-    return data_train, data_val, data_test, sicap_data, accelerator, device, args
+    return df_train, data_train, data_val, data_test, sicap_data, accelerator, device, args
     
 
-def run_experiment(data_train, data_val, data_test, sicap_data, accelerator, device, args):
+def run_experiment(df_train, data_train, data_val, data_test, sicap_data, accelerator, device, args):
     # DataLoaders
     print("Creating DataLoaders ...", flush = True)
     train_loader = DataLoader(data_train, batch_size=args.batch_size, shuffle=True, collate_fn=collate_fn, num_workers=0)
@@ -159,15 +159,15 @@ def run_experiment(data_train, data_val, data_test, sicap_data, accelerator, dev
 
     # ------------ Pérdidas y optimizadores ------------------------
     # # Calculamos los pesos 
-    # class_weights_primary = compute_class_weights(df_train['gleason_primary_mapped'])
-    # class_weights_secondary = compute_class_weights(df_train['gleason_secondary_mapped'])
-    # final_weights = (class_weights_primary + class_weights_secondary) / 2
+    class_weights_primary = compute_class_weights(df_train['gleason_primary_mapped'])
+    class_weights_secondary = compute_class_weights(df_train['gleason_secondary_mapped'])
+    final_weights = (class_weights_primary + class_weights_secondary) / 2
 
     # if args.weighted_loss:
     #     loss_BCE = nn.BCELoss(pos_weight=final_weights.to(device))
     # else:
     #     loss_BCE = nn.BCELoss()
-    loss_BCE = nn.BCELoss()
+    loss_BCE = nn.BCELoss(pos_weight=final_weights.to(device))
 
     # Optimizador
     if args.optimizer == "SGD":
@@ -322,9 +322,9 @@ def run_experiment(data_train, data_val, data_test, sicap_data, accelerator, dev
 
 if __name__ == "__main__":
    
-    data_train, data_val, data_test, sicap_data, accelerator, device, args = main()
+    df_train, data_train, data_val, data_test, sicap_data, accelerator, device, args = main()
     if not args.hiperparam_tuning:
-        run_experiment(data_train, data_val, data_test, sicap_data, accelerator, device, args)
+        run_experiment(df_train, data_train, data_val, data_test, sicap_data, accelerator, device, args)
     else:
         print("Running multiple experiments ...", flush = True)
         experiments = [
@@ -345,4 +345,4 @@ if __name__ == "__main__":
             exp_args = copy.deepcopy(args)
             for k, v in exp.items():
                 setattr(exp_args, k, v)
-            run_experiment(data_train, data_val, data_test, sicap_data, accelerator, device, exp_args)
+            run_experiment(df_train, data_train, data_val, data_test, sicap_data, accelerator, device, exp_args)
