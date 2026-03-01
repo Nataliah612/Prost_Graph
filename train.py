@@ -119,7 +119,6 @@ def main():
         df_test['gleason_secondary_mapped'] = df_test['gleason_secondary'].map(label_mapping)
         sicap_data = WSI_Dataset(df_test, df_test.index,load_on_demand=args.load_on_demand)
         
-
     load_time = fin__load - inicio__load
     print(f"Tiempo de carga en memoria de las WSI: {load_time:.4f} segundos", flush = True)
     return df_train, data_train, data_val, data_test, sicap_data, accelerator, device, args
@@ -180,7 +179,7 @@ def run_experiment(df_train, data_train, data_val, data_test, sicap_data, accele
     scheduler = ReduceLROnPlateau(
         optimizer,
         mode="min",  # porque usamos val_loss (minimizar)
-        factor=0.5,  # reduce LR a un 50% cuando no mejora
+        factor=0.1,  # reduce LR a un 50% cuando no mejora ||| reducido al 10% 
         patience = 8,  # cuántas épocas esperar sin mejora
         min_lr=1e-6,
         threshold=1e-3,

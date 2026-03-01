@@ -45,8 +45,8 @@ def grafo_fully_connected(x, training = False):
 class gat(torch.nn.Module):
     def __init__(self, heads=2): #def __init__(self, heads=4):
         super(gat, self).__init__()
-        self.gat1 = GATv2Conv(768, 512, heads=heads, concat=False, dropout=0.5)# con 0.3 overfitting
-        self.gat2 = GATv2Conv(512, 64, heads=heads, concat=False,dropout=0.5)
+        self.gat1 = GATv2Conv(768, 512, heads=heads, concat=False, dropout=0.3)# con 0.3 overfitting
+        self.gat2 = GATv2Conv(512, 64, heads=heads, concat=False,dropout=0.3)
         self.bn1 = nn.BatchNorm1d(512)
         self.bn2 = nn.BatchNorm1d(64)
         
