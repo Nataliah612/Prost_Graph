@@ -31,7 +31,6 @@ class model_mean_aggre(nn.Module):
         inputs_list = [t.to(device) for t in x]
 
         # 1) Concatenar todos los parches del batch
-        #mean_features_wsi = [torch.mean(t, dim = 0, keepdim=True) for t in inputs_list]
         lengths = [int(t.size(0)) for t in inputs_list] # Lista de N_patches por WSI, clave para reconstrucción de WSI
         
         if sum(lengths) == 0:

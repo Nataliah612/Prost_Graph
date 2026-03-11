@@ -38,14 +38,14 @@ def grafo_fully_connected(x, training = False):
     mask = fila != col
     edge_index = torch.stack([fila[mask], col[mask]], dim=0)
     
-    edge_index, _ = dropout_edge(edge_index, p=0.5, training=training) # Prueba anterior 0.3
+    #edge_index, _ = dropout_edge(edge_index, p=0, training=training) 
         
     return Data(x=x, edge_index=edge_index)
 
 class gat(torch.nn.Module):
     def __init__(self, heads=2): #def __init__(self, heads=4):
         super(gat, self).__init__()
-        self.gat1 = GATv2Conv(768, 512, heads=heads, concat=False, dropout=0.3)# con 0.3 overfitting
+        self.gat1 = GATv2Conv(768, 512, heads=heads, concat=False, dropout=0.3)
         self.gat2 = GATv2Conv(512, 64, heads=heads, concat=False,dropout=0.3)
         self.bn1 = nn.BatchNorm1d(512)
         self.bn2 = nn.BatchNorm1d(64)
@@ -116,7 +116,7 @@ class mlp(nn.Module): #Clasificador
     def __init__(self, in_dim=64, out_dim=4):
         super().__init__()
         self.ln = nn.LayerNorm(in_dim)
-        self.dropout = nn.Dropout(0.3) #0.1
+        self.dropout = nn.Dropout(0.3) 
         self.fc = nn.Linear(in_dim, out_dim)
 
     def forward(self, x):
