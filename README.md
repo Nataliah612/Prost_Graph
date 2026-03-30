@@ -1,74 +1,123 @@
 # Prost_Graph
 
 ## Overview
-**Prost_Graph** is a deep learning framework for predicting the **Gleason Grade** from prostate biopsy Whole Slide Images (WSI).
 
-The pipeline is based on **WSI patch extraction (patching)** followed by training deep learning models on extracted image patches for histopathology classification, inference and evaluacion of the models in metrics and visualization of heatmaps. Developing a scalable and accurate system for automated Gleason Grade prediction, supporting computational pathology workflows through modern deep learning techniques.
+**Prost_Graph** is a deep learning framework designed for the prediction of **Gleason Grade** from prostate biopsy Whole Slide Images (WSIs).
+
+The pipeline consists of **WSI patch extraction** followed by training deep learning models on the extracted patches for histopathological classification. It supports **training, inference, evaluation (metrics), and heatmap visualization**, aiming to provide a scalable and accurate solution for automated Gleason grading within computational pathology workflows.
+
+---
 
 ## Patch Extraction
-Patch generation is performed using the pipeline from **CPath (Computational Pathology GitHub repository)**. CLAM software [1] is used to segment and extract the tiles. All patches within WSI are stacked into a matrix of shape (N,3,S,S), being N the number of patches and S their size. Masks and stitches are provided to visualize the segmentation.
 
-Clone the CPath patch extraction repository:
-<pre> git clone https://github.com/PabloMeseguerEsbri/CPathPipeline.git </pre>
-<pre> cd /workspace/CPathPipeline </pre>
-Considering initial 20x magnification, run the following line to extract 512x512 patches at 10x magnification without overlap.
+Patch generation is performed using the **CPath (Computational Pathology) pipeline**. The CLAM framework [1] is used for tissue segmentation and tile extraction.
 
-<pre> python patching/extract_patches.py --source <path_tif> --save_dir <path_save> --seg --patch --stitch --patch_size 512 --step_size 512 --custom_downsample 2 </pre>
+All extracted patches from a WSI are stored as a tensor of shape **(N, 3, S, S)**, where:
 
-Verify that patches are correctly generated.
+* **N**: number of patches
+* **S**: patch size
+
+Additionally, segmentation masks and stitched visualizations are generated for quality control.
+
+### Setup
+
+Clone the patch extraction repository:
+
+```bash
+git clone https://github.com/PabloMeseguerEsbri/CPathPipeline.git
+cd /workspace/CPathPipeline
+```
+
+### Patch Extraction Example
+
+Assuming an initial magnification of **20x**, the following command extracts **512×512 patches at 10x magnification without overlap**:
+
+```bash
+python patching/extract_patches.py \
+  --source <path_tif> \
+  --save_dir <path_save> \
+  --seg \
+  --patch \
+  --stitch \
+  --patch_size 512 \
+  --step_size 512 \
+  --custom_downsample 2
+```
+
+After execution, verify that patches, masks, and stitched outputs are correctly generated.
+
+---
 
 ## Project Structure
 
-The models/ directory contains:
+The `models/` directory includes:
 
-Feature extraction models: 
-- Convolutional Neural Networks (CNN) [2]
-- Vision Transformers (ViT) [3]
-- Foundation models (KEEP) [4]
-- Foundation models (KEEP) with Parameter-Efficient Fine-Tuning (PEFT) methods [5]
+### Feature Extraction Models
 
-Classification heads
-Agregation architectures:
-- MIL [6]
-- GAT [7]
+* Convolutional Neural Networks (CNN) [2]
+* Vision Transformers (ViT) [3]
+* Foundation Models (KEEP) [4]
+* Foundation Models with Parameter-Efficient Fine-Tuning (PEFT) [5]
 
-Each model type is organized in its corresponding subfolder for clarity and modularity.
+### Aggregation Architectures
+
+* Multiple Instance Learning (MIL) [6]
+* Graph Attention Networks (GAT) [7]
+
+Each model type is organized into dedicated subdirectories to ensure modularity and clarity.
+
+---
 
 ## Training Strategy
+
 The dataset is split as follows:
-* 90% Training set, from this subset, 20% is used for validation
-* 10% Test set
 
-This split ensures robust model evaluation and prevents overfitting.
+* **90% Training set**
 
-## Hyperparameter Research
+  * From this, **20% is used for validation**
+* **10% Test set**
 
-The training pipeline supports an optional hyperparameter optimization mode.
+This strategy ensures robust evaluation while minimizing overfitting.
 
-To enable this research mode, use the following flag:
+---
 
-<pre> --hiperparam_tuning </pre>
+## Installation
 
-When activated, the system performs automated exploration of hyperparameters to improve model performance and identify optimal configurations.
+To install dependencies:
 
-## Resources
-[1] Lu, M. Y., Williamson, D. F., Chen, T. Y., Chen, R. J., Barbieri, M., & Mahmood, F. (2021). Data-efficient and weakly supervised computational pathology on whole-slide images. Nature biomedical engineering, 5(6), 555-570.
+```bash
+pip install -r requirements.txt
+python -m pip uninstall -y transformer-engine transformer-engine-cu12 transformer-engine-cu11
+```
 
+---
 
-[2] M. Y. Lu et al., “A visual-language foundation model for computational pathology,” Nature Medicine, vol. 30, págs. 863-874, 3 mar. de 2024, ISSN: 1546170X. DOI: 10.1038/S41591-024
-02856-4;SUBJMETA.
+## Hyperparameter Optimization
 
+The training pipeline supports an optional **hyperparameter tuning mode**.
 
-[3] T. Darcet, M. Oquab, J. Mairal y P. Bojanowski, “Vision Transformers Need Registers,” 12th International Conference on Learning Representations, ICLR 2024, sep. de 2023.
+Enable it using:
 
+```bash
+--hiperparam_tuning
+```
 
-[4] Zhou, X., Sun, L., He, D., Guan, W., Wang, R., Wang, L., ... & Xie, W. (2024). A Knowledge-enhanced Pathology Vision-language Foundation Model for Cancer Diagnosis. arXiv preprint arXiv:2412.13126.
+When activated, the system performs automated hyperparameter exploration to identify optimal configurations and improve model performance.
 
+---
 
-[5] H. Liu et al., “Few-Shot Parameter-Efficient Fine-Tuning is Better and Cheaper than In-Context Learning,” Advances in Neural Information Processing Systems, vol. 35, págs. 1950-1965, dic. de 2022.
+## References
 
+[1] Lu, M. Y., et al. (2021). *Data-efficient and weakly supervised computational pathology on whole-slide images*. Nature Biomedical Engineering, 5(6), 555–570.
 
-[6] J. Amores, “Multiple instance classification: Review, taxonomy and comparative study,” Artificial Intelligence, vol. 201, págs. 81-105, ago. de 2013, ISSN: 0004-3702. DOI: 10.1016/J.ARTINT.2013.06.003.
+[2] Lu, M. Y., et al. (2024). *A visual-language foundation model for computational pathology*. Nature Medicine, 30, 863–874.
 
+[3] Darcet, T., et al. (2023). *Vision Transformers Need Registers*. ICLR 2024.
 
-[7] P. Veliˇckovi´c, A. Casanova, P. Liò, G. Cucurull, A. Romero e Y. Bengio, “Graph Attention Networks,” 6th International Conference on Learning Representations, ICLR 2018- Conference Track Proceedings, oct. de 2017. DOI: 10.1007/978-3-031-01587-8_7.
+[4] Zhou, X., et al. (2024). *A Knowledge-enhanced Pathology Vision-language Foundation Model for Cancer Diagnosis*. arXiv:2412.13126.
+
+[5] Liu, H., et al. (2022). *Few-Shot Parameter-Efficient Fine-Tuning is Better and Cheaper than In-Context Learning*. NeurIPS.
+
+[6] Amores, J. (2013). *Multiple instance classification: Review, taxonomy and comparative study*. Artificial Intelligence, 201, 81–105.
+
+[7] Veličković, P., et al. (2018). *Graph Attention Networks*. ICLR 2018.
