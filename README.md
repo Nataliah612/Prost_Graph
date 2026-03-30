@@ -6,7 +6,7 @@
 The pipeline is based on **WSI patch extraction (patching)** followed by training deep learning models on extracted image patches for histopathology classification, inference and evaluacion of the models in metrics and visualization of heatmaps. Developing a scalable and accurate system for automated Gleason Grade prediction, supporting computational pathology workflows through modern deep learning techniques.
 
 ## Patch Extraction
-Patch generation is performed using the open-source pipeline from **CPath (Computational Pathology GitHub repository)**. CLAM software [1] is used to segment and extract the tiles. All patches within WSI are stacked into a matrix of shape (N,3,S,S), being N the number of patches and S their size. Masks and stitches are provided to visualize the segmentation.
+Patch generation is performed using the pipeline from **CPath (Computational Pathology GitHub repository)**. CLAM software [1] is used to segment and extract the tiles. All patches within WSI are stacked into a matrix of shape (N,3,S,S), being N the number of patches and S their size. Masks and stitches are provided to visualize the segmentation.
 
 Clone the CPath patch extraction repository:
 <pre> git clone https://github.com/PabloMeseguerEsbri/CPathPipeline.git </pre>
@@ -15,7 +15,7 @@ Considering initial 20x magnification, run the following line to extract 512x512
 
 <pre> python patching/extract_patches.py --source <path_tif> --save_dir <path_save> --seg --patch --stitch --patch_size 512 --step_size 512 --custom_downsample 2 </pre>
 
-Verify that patches are correctly generated and organized by slide/class.
+Verify that patches are correctly generated.
 
 ## Project Structure
 
