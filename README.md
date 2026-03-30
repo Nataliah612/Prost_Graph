@@ -53,18 +53,22 @@ When activated, the system performs automated exploration of hyperparameters to 
 
 ## Resources
 [1] Lu, M. Y., Williamson, D. F., Chen, T. Y., Chen, R. J., Barbieri, M., & Mahmood, F. (2021). Data-efficient and weakly supervised computational pathology on whole-slide images. Nature biomedical engineering, 5(6), 555-570.
-[2] M. Y. Lu et al., “A visual-language foundation model for computational pathology,” Nature Me
-dicine, vol. 30, págs. 863-874, 3 mar. de 2024, ISSN: 1546170X. DOI: 10.1038/S41591-024
+
+
+[2] M. Y. Lu et al., “A visual-language foundation model for computational pathology,” Nature Medicine, vol. 30, págs. 863-874, 3 mar. de 2024, ISSN: 1546170X. DOI: 10.1038/S41591-024
 02856-4;SUBJMETA.
-[3] T. Darcet, M. Oquab, J. Mairal y P. Bojanowski, “Vision Transformers Need Registers,” 12th
-International Conference on Learning Representations, ICLR 2024, sep. de 2023.
+
+
+[3] T. Darcet, M. Oquab, J. Mairal y P. Bojanowski, “Vision Transformers Need Registers,” 12th International Conference on Learning Representations, ICLR 2024, sep. de 2023.
+
+
 [4] Zhou, X., Sun, L., He, D., Guan, W., Wang, R., Wang, L., ... & Xie, W. (2024). A Knowledge-enhanced Pathology Vision-language Foundation Model for Cancer Diagnosis. arXiv preprint arXiv:2412.13126.
-[5] H. Liu et al., “Few-Shot Parameter-Efficient Fine-Tuning is Better and Cheaper than In-Context
-Learning,” Advances in Neural Information Processing Systems, vol. 35, págs. 1950-1965, dic. de
-2022.
-[6] J. Amores, “Multiple instance classification: Review, taxonomy and comparative study,” Artificial
-Intelligence, vol. 201, págs. 81-105, ago. de 2013, ISSN: 0004-3702. DOI: 10.1016/J.ARTINT.
-2013.06.003.
-[7] P. Veliˇckovi´c, A. Casanova, P. Liò, G. Cucurull, A. Romero e Y. Bengio, “Graph Attention Net
-works,” 6th International Conference on Learning Representations, ICLR 2018- Conference
-Track Proceedings, oct. de 2017. DOI: 10.1007/978-3-031-01587-8_7.
+
+
+[5] H. Liu et al., “Few-Shot Parameter-Efficient Fine-Tuning is Better and Cheaper than In-Context Learning,” Advances in Neural Information Processing Systems, vol. 35, págs. 1950-1965, dic. de 2022.
+
+
+[6] J. Amores, “Multiple instance classification: Review, taxonomy and comparative study,” Artificial Intelligence, vol. 201, págs. 81-105, ago. de 2013, ISSN: 0004-3702. DOI: 10.1016/J.ARTINT.2013.06.003.
+
+
+[7] P. Veliˇckovi´c, A. Casanova, P. Liò, G. Cucurull, A. Romero e Y. Bengio, “Graph Attention Networks,” 6th International Conference on Learning Representations, ICLR 2018- Conference Track Proceedings, oct. de 2017. DOI: 10.1007/978-3-031-01587-8_7.
